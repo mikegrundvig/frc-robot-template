@@ -31,7 +31,7 @@ import org.wpilib.command3.Trigger;
  */
 @ExtendWith(RobotSim.class)
 class BetaBehaviorSimTest {
-  private final JointsSimHarness sim = new JointsSimHarness(BetaRobot.ROBOT);
+  private final JointsSimHarness sim = new JointsSimHarness(BetaRobot.CONFIG.definition());
   private final JointMechanism pivot = sim.joints.of(BetaRobot.PIVOT);
   private final JointMechanism roller = sim.joints.of(BetaRobot.INTAKE);
   private final JointMechanism fullSend = sim.joints.of(BetaRobot.FULL_SEND);

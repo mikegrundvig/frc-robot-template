@@ -139,18 +139,13 @@ public final class MountOptions {
     }
 
     /** A camera here, facing one of its ways. */
-    CameraConfig camera(int way, CameraConfig.Sensor sensor) {
-      return CameraConfig.builder()
-          .name(name)
-          .forward(forward)
-          .left(left)
-          .up(up)
+    CameraConfig camera(int way, CameraConfig.ImageSensor sensor) {
+      return CameraConfig.of(name, sensor)
+          .at(forward, left, up)
+          .facing(tilt(way), yaw(way))
           .roll(Degrees.of(0))
-          .tiltUp(tilt(way))
-          .yaw(yaw(way))
-          .sensor(sensor)
-          .noiseScale(1)
-          .build();
+          .noiseScale(1.0)
+          .measured();
     }
 
     /** This place and a way of facing, as a layout's name says it: "front-left 30°, up 10°". */
@@ -294,7 +289,7 @@ public final class MountOptions {
    *     layouts than one run scores, saying how many and what would help
    */
   public List<Candidate> candidates(
-      RobotConfig robot, CameraConfig.Sensor sensor, int mostCameras) {
+      RobotConfig robot, CameraConfig.ImageSensor sensor, int mostCameras) {
     for (Option option : options) {
       String outside = option.outside(robot.definition().body());
       if (outside != null) {
@@ -344,7 +339,7 @@ public final class MountOptions {
       List<Option> chosen,
       int next,
       int mostCameras,
-      CameraConfig.Sensor sensor) {
+      CameraConfig.ImageSensor sensor) {
     if (!chosen.isEmpty()) {
       addEveryWay(candidates, chosen, sensor);
     }
@@ -360,7 +355,7 @@ public final class MountOptions {
 
   /** The chosen places, each camera facing each of its ways, counted like an odometer. */
   private static void addEveryWay(
-      List<Candidate> candidates, List<Option> chosen, CameraConfig.Sensor sensor) {
+      List<Candidate> candidates, List<Option> chosen, CameraConfig.ImageSensor sensor) {
     int[] way = new int[chosen.size()];
     while (true) {
       List<CameraConfig> cameras = new ArrayList<>();

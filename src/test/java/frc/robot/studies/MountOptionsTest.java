@@ -82,10 +82,10 @@ class MountOptionsTest {
 
     CameraConfig frontLeft = layout.cameras().get(0);
     assertThat(frontLeft.name()).isEqualTo("front-left");
-    assertThat(frontLeft.forward().in(Inches)).isCloseTo(12, within(1e-9));
-    assertThat(frontLeft.up().in(Inches)).isCloseTo(20, within(1e-9));
-    assertThat(frontLeft.yaw().in(Degrees)).isCloseTo(30, within(1e-9));
-    assertThat(frontLeft.tiltUp().in(Degrees)).isCloseTo(10, within(1e-9));
+    assertThat(frontLeft.forward().orElseThrow().in(Inches)).isCloseTo(12, within(1e-9));
+    assertThat(frontLeft.up().orElseThrow().in(Inches)).isCloseTo(20, within(1e-9));
+    assertThat(frontLeft.yaw().orElseThrow().in(Degrees)).isCloseTo(30, within(1e-9));
+    assertThat(frontLeft.tiltUp().orElseThrow().in(Degrees)).isCloseTo(10, within(1e-9));
     assertThat(layout.cameras().get(1).name()).isEqualTo("top");
   }
 
@@ -99,10 +99,10 @@ class MountOptionsTest {
                 "front-left, 304.8, 30.48, 0.508, 0.5235987755982988, 10"));
 
     CameraConfig camera = metric.candidates(ExampleRobot.SIM, SENSOR, 1).get(0).cameras().get(0);
-    assertThat(camera.forward().in(Inches)).isCloseTo(12, within(1e-9));
-    assertThat(camera.left().in(Inches)).isCloseTo(12, within(1e-9));
-    assertThat(camera.up().in(Inches)).isCloseTo(20, within(1e-9));
-    assertThat(camera.yaw().in(Degrees)).isCloseTo(30, within(1e-9));
+    assertThat(camera.forward().orElseThrow().in(Inches)).isCloseTo(12, within(1e-9));
+    assertThat(camera.left().orElseThrow().in(Inches)).isCloseTo(12, within(1e-9));
+    assertThat(camera.up().orElseThrow().in(Inches)).isCloseTo(20, within(1e-9));
+    assertThat(camera.yaw().orElseThrow().in(Degrees)).isCloseTo(30, within(1e-9));
   }
 
   @Test

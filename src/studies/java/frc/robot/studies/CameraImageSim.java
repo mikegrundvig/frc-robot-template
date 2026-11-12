@@ -1,7 +1,10 @@
 package frc.robot.studies;
 
+import static org.wpilib.units.Units.Meters;
+import static org.wpilib.units.Units.Radians;
+
 import com.michaelgrundvig.frc.localization.TagDetections;
-import com.michaelgrundvig.frc.runtime.subsystems.vision.VisionSim;
+import com.michaelgrundvig.frc.runtime.sim.VisionSim;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import java.util.ArrayList;
@@ -95,10 +98,10 @@ final class CameraImageSim {
   /**
    * @param conditions how far its tag corners land off, and how far it sees tags
    */
-  CameraImageSim(FieldModel field, CameraConfig.Sensor sensor, Conditions conditions) {
+  CameraImageSim(FieldModel field, CameraConfig.ImageSensor sensor, Conditions conditions) {
     OpenCvLoader.forceStaticLoad(); // the solves are OpenCV's
     camera =
-        VisionSim.properties(sensor, 0)
+        VisionSim.properties(cameraOf(sensor), 0)
             .setCalibError(
                 conditions.cornerNoiseMeanPixels(), conditions.cornerNoiseStdDevPixels());
     sightMeters = conditions.sightMeters();
@@ -177,7 +180,7 @@ final class CameraImageSim {
 
   /** An image's tags as the robot reads them, and the multi-tag solve from all of them. */
   TagDetections detections(List<Seen> seen, String cameraName) {
-    List<TagDetections.Tag> detected = detected(seen);
+    List<TagDetections.Sighting> detected = detected(seen);
     return new TagDetections(0, cameraName, detected, multiTag(seen, detected));
   }
 
@@ -239,8 +242,8 @@ final class CameraImageSim {
    * Each tag seen, as the robot reads it. One whose own solve failed, or whose pose isn't a number,
    * is left out.
    */
-  private static List<TagDetections.Tag> detected(List<Seen> seen) {
-    List<TagDetections.Tag> detected = new ArrayList<>();
+  private static List<TagDetections.Sighting> detected(List<Seen> seen) {
+    List<TagDetections.Sighting> detected = new ArrayList<>();
     for (Seen tag : seen) {
       PnpResult solved = tag.solved();
       if (solved == null || !isFinite(solved.best) || !isFinite(solved.alt)) {
@@ -252,7 +255,7 @@ final class CameraImageSim {
       }
       double ambiguity = solved.ambiguity;
       detected.add(
-          new TagDetections.Tag(
+          new TagDetections.Sighting(
               tag.tag().id(),
               corners,
               solved.best,
@@ -269,7 +272,7 @@ final class CameraImageSim {
    * {@code Vision} does.
    */
   private TagDetections.@Nullable MultiTag multiTag(
-      List<Seen> seen, List<TagDetections.Tag> detected) {
+      List<Seen> seen, List<TagDetections.Sighting> detected) {
     if (seen.size() < 2 || detected.isEmpty()) {
       return null;
     }
@@ -289,7 +292,7 @@ final class CameraImageSim {
     return new TagDetections.MultiTag(
         solved.best.inverse(),
         Math.max(0, solved.bestReprojErr),
-        detected.stream().map(TagDetections.Tag::id).toList());
+        detected.stream().map(TagDetections.Sighting::id).toList());
   }
 
   private static boolean isFinite(Transform3d transform) {
@@ -301,5 +304,16 @@ final class CameraImageSim {
         && Double.isFinite(rotation.getX())
         && Double.isFinite(rotation.getY())
         && Double.isFinite(rotation.getZ());
+  }
+
+  /**
+   * A PhotonVision camera of a sensor at the robot's origin, for what the simulator's camera model
+   * reads of a camera beside its sensor: its field of view and latency, the sensor's or their
+   * defaults.
+   */
+  static CameraConfig cameraOf(CameraConfig.ImageSensor sensor) {
+    return CameraConfig.of("study", sensor)
+        .at(Meters.of(0), Meters.of(0), Meters.of(0))
+        .facing(Radians.of(0), Radians.of(0));
   }
 }

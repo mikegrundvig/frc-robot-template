@@ -9,7 +9,7 @@ import com.michaelgrundvig.frc.localization.TagDetections;
 import com.michaelgrundvig.frc.localization.VisionMeasurement;
 import com.michaelgrundvig.frc.localization.VisionPipeline;
 import com.michaelgrundvig.frc.runtime.RobotConfig;
-import com.michaelgrundvig.frc.runtime.subsystems.vision.VisionSim;
+import com.michaelgrundvig.frc.runtime.sim.VisionSim;
 import com.michaelgrundvig.frc.simulation.Seeds;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
@@ -65,7 +65,7 @@ public final class CameraScoring {
   private final int[][] layouts;
 
   /** The distinct sensors, and each camera's among them. */
-  private final List<CameraConfig.Sensor> sensors = new ArrayList<>();
+  private final List<CameraConfig.ImageSensor> sensors = new ArrayList<>();
 
   private final int[] sensorOf;
   private final long[] cameraSeeds;
@@ -121,7 +121,7 @@ public final class CameraScoring {
     sensorOf = new int[cameras.size()];
     cameraSeeds = new long[cameras.size()];
     for (int m = 0; m < cameras.size(); m++) {
-      CameraConfig.Sensor sensor = cameras.get(m).sensor();
+      CameraConfig.ImageSensor sensor = cameras.get(m).sensor();
       if (!sensors.contains(sensor)) {
         sensors.add(sensor);
       }
@@ -141,18 +141,18 @@ public final class CameraScoring {
       double roll,
       double tiltUp,
       double yaw,
-      CameraConfig.Sensor sensor,
+      CameraConfig.ImageSensor sensor,
       double noiseScale) {
     static Mount of(CameraConfig camera) {
       return new Mount(
-          camera.forward().in(Meters),
-          camera.left().in(Meters),
-          camera.up().in(Meters),
-          camera.roll().in(Radians),
-          camera.tiltUp().in(Radians),
-          camera.yaw().in(Radians),
+          camera.forward().orElseThrow().in(Meters),
+          camera.left().orElseThrow().in(Meters),
+          camera.up().orElseThrow().in(Meters),
+          camera.rollOrDefault().in(Radians),
+          camera.tiltUp().orElseThrow().in(Radians),
+          camera.yaw().orElseThrow().in(Radians),
           camera.sensor(),
-          camera.noiseScale());
+          camera.noiseScaleOrDefault());
     }
 
     /** A number from where the camera is and how it points: the same on every computer. */
@@ -203,7 +203,7 @@ public final class CameraScoring {
         () -> {
           // Each thread its own cameras: their noise isn't shared.
           List<CameraImageSim> images = new ArrayList<>();
-          for (CameraConfig.Sensor sensor : sensors) {
+          for (CameraConfig.ImageSensor sensor : sensors) {
             images.add(new CameraImageSim(field, sensor, conditions));
           }
           return i -> {
@@ -384,7 +384,12 @@ public final class CameraScoring {
             seen.tags().isEmpty()
                 ? null
                 : pipeline
-                    .process(seen, camera, standingStill, robot.vision(), VisionPipeline.Trust.FULL)
+                    .process(
+                        seen,
+                        camera,
+                        standingStill,
+                        robot.vision(),
+                        VisionPipeline.Terms.AS_CONFIGURED)
                     .measurement();
         views.set(frame, m, seen.tags().size(), measurement, truth);
       }

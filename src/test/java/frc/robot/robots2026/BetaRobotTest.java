@@ -3,7 +3,6 @@ package frc.robot.robots2026;
 import static frc.robot.BetaRobot.BODY;
 import static frc.robot.BetaRobot.DRIVETRAIN;
 import static frc.robot.BetaRobot.MODULES;
-import static frc.robot.BetaRobot.ROBOT;
 import static frc.robot.robots2026.Compare.SANITY_HIGH;
 import static frc.robot.robots2026.Compare.SANITY_LOW;
 import static frc.robot.robots2026.Compare.freeRpm;
@@ -29,14 +28,16 @@ import com.michaelgrundvig.frc.world.game.Rebuilt;
 import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.BodyBuilder;
-import com.michaelgrundvig.frc.world.robot.Configuration;
 import com.michaelgrundvig.frc.world.robot.Drive;
-import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
+import com.michaelgrundvig.frc.world.robot.Drivetrain;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Output;
 import com.michaelgrundvig.frc.world.robot.Position;
+import com.michaelgrundvig.frc.world.robot.Preset;
+import com.michaelgrundvig.frc.world.robot.RevoluteJoint;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
@@ -55,6 +56,9 @@ import org.wpilib.units.measure.Mass;
  * the robot's original code, under {@code src/main/java/frc/robot/}.
  */
 class BetaRobotTest {
+  /** The robot as its program runs it. */
+  private static final RobotDefinition ROBOT = BetaRobot.CONFIG.definition();
+
   /** The robot's mass as the program takes it: as weighed. */
   private static final Mass MASS = Rebuilt.LIMITS.robotMass(BODY);
 
@@ -75,7 +79,8 @@ class BetaRobotTest {
    */
   @Test
   void theSimulatorsRobotKeepsTheirWiring() {
-    assertThat(BetaRobot.CONFIG.definition().drivetrain()).isEqualTo(ROBOT.drivetrain());
+    assertThat(BetaRobot.CONFIG.definition().drivetrain().sameHardwareAs(ROBOT.drivetrain()))
+        .isTrue();
     assertThat(BetaRobot.CONFIG.drivetrainWiring()).isEqualTo(ROBOT.drivetrain().wiring());
     assertThat(BetaRobot.CONFIG.drivetrain().gains().steerKp()).isEqualTo(16.0);
     assertThat(ROBOT.drivetrain().wheelCoefficientOfFriction()).isEqualTo(1.2);
@@ -88,7 +93,7 @@ class BetaRobotTest {
    */
   @Test
   void theSwerveModulesAreTunersOwn() {
-    DrivetrainGeometry.ModuleJoints frontLeft = DRIVETRAIN.joints().get(0);
+    Drivetrain.ModuleJoints frontLeft = DRIVETRAIN.joints().get(0);
     Sensor.Encoder cancoder =
         JointFixtures.absoluteEncoder("front-left cancoder", frontLeft.steer(), CANCODER_COUNTS);
     Sensor.Encoder rotor = frontLeft.drive().rotor();
@@ -127,7 +132,7 @@ class BetaRobotTest {
    */
   @Test
   void theSteeringIsSeededFromItsOwnMotor() {
-    DrivetrainGeometry.ModuleJoints frontLeft = DRIVETRAIN.joints().get(0);
+    Drivetrain.ModuleJoints frontLeft = DRIVETRAIN.joints().get(0);
     RobotMath corner =
         RobotMath.of(
             BODY,
@@ -143,14 +148,15 @@ class BetaRobotTest {
 
   /**
    * kSpeedAt12Volts, 5.4 m/s (TunerConstants.java:76), is the team's own: the motors and gearing
-   * reach 4.94 m/s free. It's what Drive.java desaturates the wheels to and gives PathPlanner, so
-   * every speed above 4.94 asks the drive for more than it has. The team's quirk, not the model's.
+   * reach 5.11 m/s free without FOC, as the template runs them (4.94 with FOC, as their code models
+   * it). It's what Drive.java desaturates the wheels to and gives PathPlanner, so every speed above
+   * 5.11 asks the drive for more than it has. The team's quirk, not the model's.
    */
   @Test
   void theTeamsTopSpeedIsAboveWhatTheMotorsReach() {
     double free = MODULES.freeSpeed().in(MetersPerSecond);
 
-    assertThat(free).isCloseTo(4.9404, within(1e-4));
+    assertThat(free).isCloseTo(5.1108, within(1e-4));
     assertThat(5.4).isGreaterThan(free);
     assertThat(3.25).as("the drivers' top speed, Constants.java:46").isLessThan(free);
   }
@@ -224,11 +230,9 @@ class BetaRobotTest {
   @Test
   void theirPlacesAreNamedInTheDefinition() {
     assertThat(BetaRobot.PIVOT.positions()).extracting(Position::name).containsExactly("in", "out");
-    assertThat(BetaRobot.INTAKE.output("outtaking").value() * 60 / (2 * Math.PI))
+    assertThat(RobotMath.output(BetaRobot.INTAKE, "outtaking").value() * 60 / (2 * Math.PI))
         .isCloseTo(-500, within(1e-9));
-    assertThat(ROBOT.configurations())
-        .extracting(Configuration::name)
-        .containsExactly("feeding", "unjamming");
+    assertThat(ROBOT.presets()).extracting(Preset::name).containsExactly("feeding", "unjamming");
     assertThat(BetaRobot.FEEDING.joints())
         .containsExactly(BetaRobot.FULL_SEND, BetaRobot.TRANSITION);
     assertThat(ROBOT.everyInterlock())
@@ -244,7 +248,7 @@ class BetaRobotTest {
    */
   @Test
   void theAutosFeederSpeedIsRefused() {
-    Joint.Revolute autoFeed =
+    RevoluteJoint autoFeed =
         withOutputs(
             BetaRobot.FULL_SEND, Output.rpm("feeding", 5000), Output.rpm("unjamming", -1000));
 
@@ -278,29 +282,25 @@ class BetaRobotTest {
   }
 
   /**
-   * The interlock holds for every configuration: one that runs the intake's roller with the pivot
-   * stowed is refused, and one that puts the pivot out first is taken.
+   * The interlock holds for every preset: one that runs the intake's roller with the pivot stowed
+   * is refused, and one that puts the pivot out first is taken.
    */
   @Test
-  void aConfigurationThatRunsTheIntakeStowedIsRefused() {
-    Configuration stowed = Configuration.of("intaking", BetaRobot.INTAKE.at(BetaRobot.INTAKING));
-    Configuration out =
-        Configuration.of(
+  void aPresetThatRunsTheIntakeStowedIsRefused() {
+    Preset stowed = Preset.of("intaking", BetaRobot.INTAKE.at(BetaRobot.INTAKING));
+    Preset out =
+        Preset.of(
             "intaking",
             BetaRobot.PIVOT.at(BetaRobot.PIVOT_OUT),
             BetaRobot.INTAKE.at(BetaRobot.INTAKING));
 
     assertThatIllegalArgumentException()
         .isThrownBy(
-            () -> RobotDefinitionBuilder.builder(ROBOT).configurations(List.of(stowed)).build())
+            () -> RobotDefinitionBuilder.builder(ROBOT).presets(List.of(stowed)).build().checked())
         .withMessage(
-            "RobotDefinition[beta].configurations: configuration intaking runs intake, but"
+            "RobotDefinition[beta].presets: preset intaking runs intake, but"
                 + " intake runs only when pivot at least 110°, and pivot is at 1.5°, where it rests");
-    assertThat(
-            RobotDefinitionBuilder.builder(ROBOT)
-                .configurations(List.of(out))
-                .build()
-                .configurations())
+    assertThat(RobotDefinitionBuilder.builder(ROBOT).presets(List.of(out)).build().presets())
         .containsExactly(out);
   }
 
@@ -372,7 +372,7 @@ class BetaRobotTest {
    */
   @Test
   void thePivotHasNoGravitySeedWithoutAMass() {
-    RobotMath.Gains gains = math.idealGains(BetaRobot.PIVOT);
+    RobotMath.Feedforward gains = math.idealGains(BetaRobot.PIVOT);
     double rotor = Motor.KRAKEN_X60.rotorInertia().in(KilogramSquareMeters) * 25 * 25;
 
     assertThat(gains.kG()).isZero();
@@ -394,7 +394,17 @@ class BetaRobotTest {
     List<Finding> notes =
         ROBOT.findings(MASS).stream()
             .filter(finding -> finding.level() == Finding.Level.NOTE)
+            .filter(finding -> !finding.message().startsWith("camera "))
             .toList();
+    // Each camera leaves its noise scale, latency, field of view and sight range to the defaults,
+    // and all but the one rolled its roll: one note each, the robot's, which names what the
+    // simulator reads too.
+    assertThat(ROBOT.findings(MASS))
+        .filteredOn(finding -> finding.message().startsWith("camera "))
+        .allSatisfy(note -> assertThat(note.message()).contains("In the simulator alone, "))
+        .extracting(Finding::scope)
+        .containsOnly(Scope.ROBOT)
+        .hasSize(ROBOT.cameras().size());
 
     assertThat(notes)
         .extracting(Finding::message, Finding::scope)
@@ -408,6 +418,10 @@ class BetaRobotTest {
                     + " bumpers and battery: carried as one rigid body",
                 Scope.SIMULATOR),
             tuple(
+                "the robot has no backup IMU: with the gyro lost, its heading rests on the wheels"
+                    + " alone: give Systemcore's, .backupImu(ImuMount.UNCHECKED), once it has one",
+                Scope.ROBOT),
+            tuple(
                 "the tread's grip isn't measured: it's 1.2, PathPlanner's default: drive moves"
                     + " plan their acceleration on it, and the slip check judges by it: measure it"
                     + " with a pull test (docs/characterization.md, tread friction)",
@@ -418,8 +432,9 @@ class BetaRobotTest {
                 Scope.SIMULATOR),
             tuple(
                 "pivot has no kG: it holds against gravity by kP alone, so it sits below its"
-                    + " targets until its kG is tuned and written, withKg(...), or written as 0"
-                    + " for a counterbalanced joint",
+                    + " targets until its kG is tuned and written: withKg(k) for a joint level at"
+                    + " its zero, withKg(k, angle) with the angle its weight pulls hardest at for"
+                    + " one that isn't, or 0 for a counterbalanced joint",
                 Scope.ROBOT),
             tuple(
                 "intake roller has no mass: intake roller adds nothing to intake's inertia, so its"
@@ -450,6 +465,7 @@ class BetaRobotTest {
             "beta",
             "beta",
             "beta",
+            "beta",
             "pivot",
             "pivot",
             "intake",
@@ -476,27 +492,30 @@ class BetaRobotTest {
     Map<Joint, Double> lowered = Map.of(BetaRobot.HOOD, 0.0);
     Map<Joint, Double> raised = Map.of(BetaRobot.HOOD, Math.toRadians(40));
 
-    assertThat(servo.command(math.coordinate(BetaRobot.HOOD.ownDrives().get(0), lowered)))
+    assertThat(servo.command(math.coordinate(RobotMath.ownDrives(BetaRobot.HOOD).get(0), lowered)))
         .isCloseTo(0.65, within(1e-9));
-    assertThat(servo.command(math.coordinate(BetaRobot.HOOD.ownDrives().get(0), raised)))
+    assertThat(servo.command(math.coordinate(RobotMath.ownDrives(BetaRobot.HOOD).get(0), raised)))
         .isCloseTo(1.0, within(0.001));
-    assertThat(math.coordinate(BetaRobot.HOOD.ownDrives().get(1), raised))
-        .isCloseTo(math.coordinate(BetaRobot.HOOD.ownDrives().get(0), raised), within(1e-12));
-    assertThat(math.torque(BetaRobot.HOOD.ownDrives().get(0), BetaRobot.HOOD, lowered, 1.0))
+    assertThat(math.coordinate(RobotMath.ownDrives(BetaRobot.HOOD).get(1), raised))
+        .isCloseTo(
+            math.coordinate(RobotMath.ownDrives(BetaRobot.HOOD).get(0), raised), within(1e-12));
+    assertThat(
+            math.torque(RobotMath.ownDrives(BetaRobot.HOOD).get(0), BetaRobot.HOOD, lowered, 1.0))
         .as("told to extend, it lifts the hood")
         .isPositive();
-    assertThat(math.torque(BetaRobot.HOOD.ownDrives().get(0), BetaRobot.HOOD, lowered, 0.65))
+    assertThat(
+            math.torque(RobotMath.ownDrives(BetaRobot.HOOD).get(0), BetaRobot.HOOD, lowered, 0.65))
         .as("told where it is, it holds")
         .isCloseTo(0, within(1e-9));
   }
 
   /** A joint's own motors, from its block. */
   private static Drive motors(Joint joint) {
-    return joint.ownDrives().getFirst();
+    return RobotMath.ownDrives(joint).getFirst();
   }
 
   /** A joint's own absolute encoder, from its block. */
   private static Sensor.Encoder absolute(Joint joint) {
-    return (Sensor.Encoder) joint.ownSensors().getFirst();
+    return (Sensor.Encoder) RobotMath.ownSensors(joint).getFirst();
   }
 }

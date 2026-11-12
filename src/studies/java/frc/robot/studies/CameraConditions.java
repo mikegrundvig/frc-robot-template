@@ -5,12 +5,11 @@ import static org.wpilib.units.Units.Meters;
 import com.michaelgrundvig.frc.runtime.ExampleRobot;
 import com.michaelgrundvig.frc.runtime.RobotConfig;
 import com.michaelgrundvig.frc.runtime.RobotConfigBuilder;
-import com.michaelgrundvig.frc.runtime.subsystems.vision.VisionSim;
+import com.michaelgrundvig.frc.runtime.sim.VisionSim;
 import com.michaelgrundvig.frc.simulation.Seeds;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.CameraConfigBuilder;
-import com.michaelgrundvig.frc.world.robot.CameraConfigSensorBuilder;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import java.util.ArrayList;
 import java.util.List;
@@ -97,12 +96,10 @@ record CameraConditions(
     }
     List<CameraConfig> cameras = new ArrayList<>();
     for (CameraConfig camera : robot.definition().cameras()) {
-      CameraConfig.Sensor sensor = camera.sensor();
-      double sight = Math.min(sightMeters, sensor.sightRange().in(Meters));
+      double sight = Math.min(sightMeters, camera.sightRangeOrDefault().in(Meters));
       cameras.add(
           CameraConfigBuilder.builder(camera)
-              .sensor(
-                  CameraConfigSensorBuilder.builder(sensor).sightRange(Meters.of(sight)).build())
+              .sensor(camera.sensor().sightRange(Meters.of(sight)))
               .build());
     }
     return RobotConfigBuilder.builder(robot)

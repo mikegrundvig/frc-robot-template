@@ -17,6 +17,7 @@ import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.Motor;
+import com.michaelgrundvig.frc.world.robot.RevoluteJoint;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.DeltaRobot;
 import java.io.IOException;
@@ -38,21 +39,23 @@ import org.junit.jupiter.api.extension.ExtendWith;
 class DeltaRecordedSimTest {
   /** The pivot's loop closed on its duty-cycle encoder, on the robot, each loop. */
   private static RobotDefinition closed() {
-    return DeltaRobot.ROBOT.with(
-        DeltaRobot.PIVOT.absoluteEncoder(
-            encoder ->
-                encoder.on(
-                    MechanismWiring.PortEncoder.dutyCycle(1)
-                        .offset(Degrees.of(100))
-                        .closesLoop())));
+    return DeltaRobot.CONFIG
+        .definition()
+        .with(
+            DeltaRobot.PIVOT.absoluteEncoder(
+                encoder ->
+                    encoder.on(
+                        MechanismWiring.PortEncoder.dutyCycle(1)
+                            .offset(Degrees.of(100))
+                            .closesLoop())));
   }
 
   /** The pivot on a NEO on a SPARK MAX, and the shooter on four Vortexes on SPARK Flexes. */
   private static RobotDefinition sparks() {
-    Joint.Revolute pivot =
+    RevoluteJoint pivot =
         unmotored(DeltaRobot.PIVOT)
             .motors(Motor.NEO.through(Gearing.of(25)).on(SPARK_MAX.can(32).clockwise()));
-    Joint.Revolute shooter =
+    RevoluteJoint shooter =
         unmotored(DeltaRobot.SHOOTER)
             .motors(
                 Motor.NEO_VORTEX
@@ -62,13 +65,13 @@ class DeltaRecordedSimTest {
                         SPARK_FLEX.can(44).clockwise(),
                         SPARK_FLEX.can(41),
                         SPARK_FLEX.can(42)));
-    return DeltaRobot.ROBOT.with(pivot, shooter);
+    return DeltaRobot.CONFIG.definition().with(pivot, shooter);
   }
 
   @Test
   void theirSettingsAreAsRecorded() throws IOException {
     List<String> rows = new ArrayList<>();
-    for (RobotDefinition robot : List.of(DeltaRobot.ROBOT, closed(), sparks())) {
+    for (RobotDefinition robot : List.of(DeltaRobot.CONFIG.definition(), closed(), sparks())) {
       rows.addAll(JointRecordings.settings(robot));
     }
     GoldenFile.check(getClass(), "delta-settings.csv", JointRecordings.SETTINGS, rows);
@@ -76,7 +79,7 @@ class DeltaRecordedSimTest {
 
   @Test
   void theirSessionIsAsRecorded() throws IOException {
-    List<String> rows = new ArrayList<>(session(DeltaRobot.ROBOT));
+    List<String> rows = new ArrayList<>(session(DeltaRobot.CONFIG.definition()));
     rows.addAll(session(closed()));
     GoldenFile.check(getClass(), "delta-session.csv", rows.get(0), rows);
   }

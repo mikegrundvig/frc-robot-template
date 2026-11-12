@@ -1,6 +1,6 @@
 package frc.robot.studies;
 
-import com.michaelgrundvig.frc.localization.EstimatorConfig;
+import com.michaelgrundvig.frc.localization.HeadingCorrection;
 import com.michaelgrundvig.frc.runtime.ExampleRobot;
 import com.michaelgrundvig.frc.runtime.lib.timing.RobotLoop;
 import com.michaelgrundvig.frc.simulation.Seeds;
@@ -194,7 +194,7 @@ public final class ConsistencyStudy {
       ConsistencyRuns.Setup setup,
       PrintStream out) {
     List<Result> results = new ArrayList<>();
-    double tolerance = ExampleRobot.SIM.vision().mountToleranceMeters();
+    double tolerance = ExampleRobot.SIM.vision().outOfCalibrationMeters();
     long fingerprint = 0;
     for (ConsistencyRuns.Run run : runs) {
       Consistency consistency = new Consistency();
@@ -406,14 +406,14 @@ public final class ConsistencyStudy {
   }
 
   /** The way to correct the heading an option names; the configuration's without one. */
-  static EstimatorConfig.HeadingCorrection heading(@Nullable String name) {
+  static HeadingCorrection heading(@Nullable String name) {
     if (name == null) {
       return ConsistencyRuns.Setup.MATCHED.heading();
     }
     return switch (name) {
-      case "measurements" -> EstimatorConfig.HeadingCorrection.HEADING_MEASUREMENTS;
-      case "doubt" -> EstimatorConfig.HeadingCorrection.HEADING_MEASUREMENTS_AND_MOUNT_DOUBT;
-      case "every" -> EstimatorConfig.HeadingCorrection.EVERY_FIX;
+      case "measurements" -> HeadingCorrection.HEADING_MEASUREMENTS;
+      case "doubt" -> HeadingCorrection.HEADING_MEASUREMENTS_AND_MOUNT_DOUBT;
+      case "every" -> HeadingCorrection.EVERY_FIX;
       default ->
           throw new IllegalArgumentException(
               "--heading must be measurements, doubt, or every: " + name);

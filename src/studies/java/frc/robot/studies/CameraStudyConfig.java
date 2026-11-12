@@ -6,7 +6,7 @@ import static com.michaelgrundvig.frc.world.config.Rules.positive;
 import static com.michaelgrundvig.frc.world.config.Rules.shown;
 import static org.wpilib.units.Units.Meters;
 
-import com.michaelgrundvig.frc.runtime.subsystems.vision.VisionSim;
+import com.michaelgrundvig.frc.runtime.sim.VisionSim;
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import frc.robot.Robots;
@@ -22,7 +22,7 @@ import frc.robot.Robots;
  *     it, on average, in pixels: the simulator's own by default
  * @param cornerNoiseStdDevPixels and that distance's spread: the simulator's own by default
  * @param sightMeters tags farther than this aren't detected: by default the sight range of the
- *     robot's cameras ({@code CameraConfig.Sensor.sightRange}), which the simulator's use too
+ *     robot's cameras ({@code CameraConfig.ImageSensor.sightRange}), which the simulator's use too
  * @param gyroErrorDegrees how far off the gyro's heading typically is (one standard deviation):
  *     every solve takes its heading from the gyro, so its error moves every position solved
  * @param mountErrorMillimeters how far each camera really sits from its configured place, at most,
@@ -66,26 +66,27 @@ public record CameraStudyConfig(
    * simulator's own camera errors and the gyro a quarter degree off. Two threads, since the
    * computer may be shared.
    */
-  public static final CameraStudyConfig DEFAULTS =
-      builder()
-          .gridMeters(0.5)
-          .headings(8)
-          .frames(2)
-          .cornerNoiseMeanPixels(VisionSim.CORNER_NOISE_MEAN_PIXELS)
-          .cornerNoiseStdDevPixels(VisionSim.CORNER_NOISE_STD_DEV_PIXELS)
-          .sightMeters(
-              Robots.current().definition().cameras().get(0).sensor().sightRange().in(Meters))
-          .gyroErrorDegrees(0.25)
-          .mountErrorMillimeters(0)
-          .mountErrorDegrees(0)
-          .otherRobotsLeast(0)
-          .otherRobotsMost(0)
-          .otherRobotsHeightMeters(0)
-          .trials(0)
-          .mostCameras(4)
-          .seed(1)
-          .threads(2)
-          .build();
+  public static CameraStudyConfig defaults() {
+    return builder()
+        .gridMeters(0.5)
+        .headings(8)
+        .frames(2)
+        .cornerNoiseMeanPixels(VisionSim.CORNER_NOISE_MEAN_PIXELS)
+        .cornerNoiseStdDevPixels(VisionSim.CORNER_NOISE_STD_DEV_PIXELS)
+        .sightMeters(
+            Robots.current().definition().cameras().get(0).sightRangeOrDefault().in(Meters))
+        .gyroErrorDegrees(0.25)
+        .mountErrorMillimeters(0)
+        .mountErrorDegrees(0)
+        .otherRobotsLeast(0)
+        .otherRobotsMost(0)
+        .otherRobotsHeightMeters(0)
+        .trials(0)
+        .mostCameras(4)
+        .seed(1)
+        .threads(2)
+        .build();
+  }
 
   public CameraStudyConfig {
     Checks.on(CameraStudyConfig.class)

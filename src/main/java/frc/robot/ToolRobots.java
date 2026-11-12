@@ -1,9 +1,9 @@
 package frc.robot;
 
 import com.michaelgrundvig.frc.runtime.RobotConfig;
-import com.michaelgrundvig.frc.world.bridges.RobotCatalog;
-import com.michaelgrundvig.frc.world.bridges.RobotDescription;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
+import com.michaelgrundvig.frc.world.tools.RobotCatalog;
+import com.michaelgrundvig.frc.world.tools.RobotDescription;
 import java.util.List;
 import java.util.Optional;
 
@@ -33,6 +33,6 @@ public final class ToolRobots implements RobotCatalog {
         definition.body(),
         definition.drivetrain(),
         definition.cameras(),
-        Optional.of(definition.imus().gyro().position()));
+        Optional.of(definition.gyroMount().position()));
   }
 }

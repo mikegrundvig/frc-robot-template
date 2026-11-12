@@ -28,7 +28,7 @@ import org.wpilib.command3.Trigger;
  */
 @ExtendWith(RobotSim.class)
 class DeltaBehaviorSimTest {
-  private final JointsSimHarness sim = new JointsSimHarness(DeltaRobot.ROBOT);
+  private final JointsSimHarness sim = new JointsSimHarness(DeltaRobot.CONFIG.definition());
   private final JointMechanism pivot = sim.joints.of(DeltaRobot.PIVOT);
   private final JointMechanism roller = sim.joints.of(DeltaRobot.INTAKE);
   private final JointMechanism fullSend = sim.joints.of(DeltaRobot.FULL_SEND);

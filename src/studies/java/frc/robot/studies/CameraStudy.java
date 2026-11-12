@@ -141,7 +141,7 @@ public final class CameraStudy {
             config.seed());
     List<Sample> samples = grid.samples();
     Candidate own = Candidates.own(robot);
-    CameraConfig.Sensor sensor = robot.definition().cameras().get(0).sensor();
+    CameraConfig.ImageSensor sensor = robot.definition().cameras().get(0).sensor();
     String mountsFile = options.get("mounts");
     List<Candidate> candidates = new ArrayList<>(List.of(own));
     String layouts;
@@ -297,7 +297,7 @@ public final class CameraStudy {
   }
 
   static CameraStudyConfig config(Map<String, String> options) {
-    CameraStudyConfig d = CameraStudyConfig.DEFAULTS;
+    CameraStudyConfig d = CameraStudyConfig.defaults();
     int[] otherRobots = otherRobots(options, d);
     try {
       return CameraStudyConfigBuilder.builder(d)

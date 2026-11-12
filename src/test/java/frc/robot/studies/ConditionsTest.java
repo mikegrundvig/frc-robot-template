@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Meters;
 
-import com.michaelgrundvig.frc.runtime.subsystems.vision.VisionSim;
+import com.michaelgrundvig.frc.runtime.sim.VisionSim;
 import frc.robot.Robots;
 import java.util.HashSet;
 import java.util.Set;
@@ -14,16 +14,16 @@ import org.wpilib.math.geometry.Transform3d;
 
 /** How the cameras and robot err: the nominal conditions, and a robustness run's draws. */
 class ConditionsTest {
-  private static final CameraStudyConfig DEFAULTS = CameraStudyConfig.DEFAULTS;
+  private static final CameraStudyConfig STUDY = CameraStudyConfig.defaults();
 
   @Test
   void theNominalConditionsAreTheSimulatorsOwn() {
-    Conditions nominal = Conditions.nominal(DEFAULTS);
+    Conditions nominal = Conditions.nominal(STUDY);
 
     assertThat(nominal.cornerNoiseMeanPixels()).isEqualTo(VisionSim.CORNER_NOISE_MEAN_PIXELS);
     assertThat(nominal.cornerNoiseStdDevPixels()).isEqualTo(VisionSim.CORNER_NOISE_STD_DEV_PIXELS);
     assertThat(nominal.sightMeters())
-        .isEqualTo(Robots.current().definition().cameras().get(0).sensor().sightRange().in(Meters));
+        .isEqualTo(Robots.current().definition().cameras().get(0).sightRangeOrDefault().in(Meters));
     assertThat(nominal.mountError(42)).isEqualTo(Transform3d.ZERO);
     assertThat(nominal.described())
         .isEqualTo(
@@ -35,9 +35,9 @@ class ConditionsTest {
   void eachTrialDrawsEveryErrorFromItsRange() {
     Set<Double> sights = new HashSet<>();
     for (int t = 0; t < 50; t++) {
-      Conditions trial = Conditions.trial(DEFAULTS, t);
+      Conditions trial = Conditions.trial(STUDY, t);
 
-      assertThat(trial).isEqualTo(Conditions.trial(DEFAULTS, t));
+      assertThat(trial).isEqualTo(Conditions.trial(STUDY, t));
       assertThat(trial.cornerNoiseMeanPixels()).isBetween(0.1, 0.6);
       assertThat(trial.cornerNoiseStdDevPixels() / trial.cornerNoiseMeanPixels())
           .as("the simulator's proportion")
@@ -49,8 +49,8 @@ class ConditionsTest {
       sights.add(trial.sightMeters());
     }
     assertThat(sights).as("each trial its own").hasSize(50);
-    CameraStudyConfig otherSeed = CameraStudyConfigBuilder.builder(DEFAULTS).seed(2).build();
-    assertThat(Conditions.trial(otherSeed, 0)).isNotEqualTo(Conditions.trial(DEFAULTS, 0));
+    CameraStudyConfig otherSeed = CameraStudyConfigBuilder.builder(STUDY).seed(2).build();
+    assertThat(Conditions.trial(otherSeed, 0)).isNotEqualTo(Conditions.trial(STUDY, 0));
   }
 
   /** Another run's seed gives other trials, not the same ones shifted along. */
@@ -58,7 +58,7 @@ class ConditionsTest {
   void runsWithDifferentSeedsShareNoTrial() {
     Set<Long> seeds = new HashSet<>();
     for (long seed = 1; seed <= 3; seed++) {
-      CameraStudyConfig run = CameraStudyConfigBuilder.builder(DEFAULTS).seed(seed).build();
+      CameraStudyConfig run = CameraStudyConfigBuilder.builder(STUDY).seed(seed).build();
       for (int t = 0; t < CameraStudyConfig.ROBUST_TRIALS; t++) {
         assertThat(seeds.add(Conditions.trial(run, t).seed()))
             .as("seed %d trial %d", seed, t)

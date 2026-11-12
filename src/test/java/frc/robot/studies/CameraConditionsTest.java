@@ -51,7 +51,7 @@ class CameraConditionsTest {
     assertThat(errors.cornerNoise()).isEqualTo(corners);
     assertThat(conditions.robot().definition().cameras())
         .allSatisfy(
-            camera -> assertThat(camera.sensor().sightRange().in(Meters)).isEqualTo(sightMeters));
+            camera -> assertThat(camera.sightRangeOrDefault().in(Meters)).isEqualTo(sightMeters));
     assertThat(errors).isEqualTo(conditions.on(base, SEED));
     if (millimeters == 0) {
       assertThat(errors).as("a world left as it was").isEqualTo(base);

@@ -32,7 +32,7 @@ public record Candidate(String name, List<CameraConfig> cameras) {
    */
   public void checkOn(RobotConfig robot) {
     try {
-      RobotDefinitionBuilder.builder(robot.definition()).cameras(cameras).build();
+      RobotDefinitionBuilder.builder(robot.definition()).cameras(cameras).build().checked();
     } catch (IllegalArgumentException e) {
       throw new IllegalArgumentException(name + ": " + e.getMessage(), e);
     }

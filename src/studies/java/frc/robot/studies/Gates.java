@@ -38,7 +38,7 @@ final class Gates {
         && Math.hypot(
                 sample.covariance().largestPositionStdDev(),
                 JUDGING_DISTANCE_METERS * sample.covariance().headingStdDev())
-            <= VISION.mountToleranceMeters();
+            <= VISION.outOfCalibrationMeters();
   }
 
   /** The scoring gate's test on the position's uncertainty. */

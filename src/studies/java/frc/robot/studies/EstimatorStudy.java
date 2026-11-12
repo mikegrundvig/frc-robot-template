@@ -45,6 +45,10 @@ public final class EstimatorStudy {
         --cameras=NAME        how the simulated cameras err, on top of each scenario's own faults:
                               nominal (the simulator's, the default) or pessimistic (corners 0.6 px
                               off, tags seen to 5 m, each camera off its mount by up to 5 mm and 1°)
+        --software=NAME       what the robot's cameras run: photonvision (the default) or visor,
+                              which sends each tag with its own pose and no multi-tag solution
+        --localizer=NAME      what A, the robot, works out where it is with: default (the
+                              library's estimator) or wpilib (WPILib's, as a robot chooses it)
         --cost                also time each estimator and count its allocations, on the first
                               scenario's first seed (cost.csv)
         --trace               also write the first seed of each scenario loop by loop
@@ -55,7 +59,7 @@ public final class EstimatorStudy {
   static final int SEEDS = 20;
 
   private static final Set<String> OPTIONS =
-      Set.of("scenarios", "seeds", "seed", "out", "merge", "cameras");
+      Set.of("scenarios", "seeds", "seed", "out", "merge", "cameras", "software", "localizer");
 
   private EstimatorStudy() {}
 
@@ -120,13 +124,18 @@ public final class EstimatorStudy {
     }
 
     CameraConditions cameras = CameraConditions.named(options.getOrDefault("cameras", "nominal"));
+    StudyRobot studied =
+        StudyRobot.named(
+            options.getOrDefault("software", "photonvision"),
+            options.getOrDefault("localizer", "default"));
+    out.println("A is the robot with " + studied.describe() + ".");
     long start = System.nanoTime();
     List<Row> rows = new ArrayList<>();
     List<String> fed = new ArrayList<>();
     fed.add("scenario,seed,contender,offered,added,later_discarded,misreads,samples_per_loop");
     for (EstimatorRuns.Scenario scenario : scenarios) {
       for (long seed = first; seed < first + seeds; seed++) {
-        EstimatorRuns.Played played = EstimatorRuns.play(scenario, seed, false, cameras);
+        EstimatorRuns.Played played = EstimatorRuns.play(scenario, seed, false, cameras, studied);
         for (Map.Entry<String, EstimatorScores.Measures> each : played.measures().entrySet()) {
           rows.add(new Row(scenario.name(), seed, each.getKey(), each.getValue()));
         }
@@ -163,7 +172,8 @@ public final class EstimatorStudy {
       out.print(EstimatorReport.headline(scenario.name(), rows));
     }
     if (options.containsKey("cost")) {
-      EstimatorRuns.Played played = EstimatorRuns.play(scenarios.get(0), first, true, cameras);
+      EstimatorRuns.Played played =
+          EstimatorRuns.play(scenarios.get(0), first, true, cameras, studied);
       List<String> lines = new ArrayList<>();
       lines.add("contender,median_us,p99_us,worst_us,bytes_per_loop");
       for (EstimatorCost.Cost cost : EstimatorCost.measure(played.loops(), played.start())) {

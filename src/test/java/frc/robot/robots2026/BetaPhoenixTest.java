@@ -2,9 +2,9 @@ package frc.robot.robots2026;
 
 import static com.michaelgrundvig.frc.world.robot.MechanismWiring.CANCODER;
 import static frc.robot.BetaRobot.BODY;
+import static frc.robot.BetaRobot.CONFIG;
 import static frc.robot.BetaRobot.DRIVETRAIN;
 import static frc.robot.BetaRobot.PIVOT;
-import static frc.robot.BetaRobot.ROBOT;
 import static frc.robot.robots2026.Parts.CANCODER_COUNTS;
 import static frc.robot.robots2026.PhoenixParts.configure;
 import static frc.robot.robots2026.PhoenixParts.control;
@@ -30,13 +30,14 @@ import com.michaelgrundvig.frc.world.physical.Inertia;
 import com.michaelgrundvig.frc.world.physical.MassProperties;
 import com.michaelgrundvig.frc.world.robot.ControllerPlan;
 import com.michaelgrundvig.frc.world.robot.Drive;
-import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
+import com.michaelgrundvig.frc.world.robot.Drivetrain;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Joint;
-import com.michaelgrundvig.frc.world.robot.JointRevoluteBuilder;
 import com.michaelgrundvig.frc.world.robot.Link;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.Motor;
+import com.michaelgrundvig.frc.world.robot.RevoluteJoint;
+import com.michaelgrundvig.frc.world.robot.RevoluteJointBuilder;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.BetaRobot;
@@ -54,7 +55,7 @@ import org.wpilib.math.geometry.Translation3d;
  * Constants.java:81), the kind of slip the helper leaves no place for.
  */
 class BetaPhoenixTest {
-  private final RobotMath math = ROBOT.math();
+  private final RobotMath math = CONFIG.definition().math();
 
   /**
    * Each TalonFX reads its joint through its drive's gearing. the robot's code sets no ratio, so
@@ -188,20 +189,16 @@ class BetaPhoenixTest {
   @Test
   void weighedItsGravityOffsetWouldSitAtPhoenixsLimit() {
     for (double kilograms : new double[] {1, 6}) {
-      Joint.Revolute weighed =
-          JointRevoluteBuilder.builder(PIVOT)
+      RevoluteJoint weighed =
+          RevoluteJointBuilder.builder(PIVOT)
               .link(
-                  Link.builder()
-                      .label("intake arm")
-                      .mass(
-                          MassProperties.builder()
-                              .mass(Kilograms.of(kilograms))
-                              .cg(new Translation3d(0, 0, 0.2))
-                              .inertia(
-                                  Inertia.box(
-                                      Kilograms.of(kilograms), new Translation3d(0.05, 0.55, 0.36)))
-                              .build())
-                      .build())
+                  Link.of(
+                      "intake arm",
+                      MassProperties.of(
+                          Kilograms.of(kilograms),
+                          new Translation3d(0, 0, 0.2),
+                          Inertia.box(
+                              Kilograms.of(kilograms), new Translation3d(0.05, 0.55, 0.36)))))
               .build();
       Drive motor = JointFixtures.motors(weighed, Motor.KRAKEN_X60, 1, Gearing.of(25));
       RobotMath alone = RobotMath.of(BODY, List.of(weighed), List.of(), List.of(motor), List.of());
@@ -234,7 +231,7 @@ class BetaPhoenixTest {
    */
   @Test
   void theSwerveModulesAreTunersOwn() {
-    DrivetrainGeometry.ModuleJoints frontLeft = DRIVETRAIN.joints().get(0);
+    Drivetrain.ModuleJoints frontLeft = DRIVETRAIN.joints().get(0);
     Sensor.Encoder cancoder =
         JointFixtures.absoluteEncoder("front-left cancoder", frontLeft.steer(), CANCODER_COUNTS);
     RobotMath corner = corner(BODY, frontLeft, cancoder);
@@ -293,11 +290,11 @@ class BetaPhoenixTest {
 
   /** A joint's own motors, from its block. */
   private static Drive motors(Joint joint) {
-    return joint.ownDrives().getFirst();
+    return RobotMath.ownDrives(joint).getFirst();
   }
 
   /** A joint's own absolute encoder, from its block. */
   private static Sensor.Encoder absolute(Joint joint) {
-    return (Sensor.Encoder) joint.ownSensors().getFirst();
+    return (Sensor.Encoder) RobotMath.ownSensors(joint).getFirst();
   }
 }

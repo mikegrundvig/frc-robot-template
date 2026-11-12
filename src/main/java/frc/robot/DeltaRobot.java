@@ -1,6 +1,8 @@
 package frc.robot;
 
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.CANCODER;
 import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.TALON_FX;
+import static com.michaelgrundvig.frc.world.robot.SwerveWiring.PIGEON_2;
 import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.DegreesPerSecond;
@@ -10,24 +12,16 @@ import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.KilogramSquareMeters;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.MetersPerSecond;
-import static org.wpilib.units.Units.Milliseconds;
 import static org.wpilib.units.Units.Pounds;
 import static org.wpilib.units.Units.Rotations;
-import static org.wpilib.units.Units.RotationsPerSecond;
-import static org.wpilib.units.Units.Seconds;
 
-import com.michaelgrundvig.frc.localization.EstimatorConfig;
-import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.runtime.RobotConfig;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.CanBus;
-import com.michaelgrundvig.frc.world.robot.Configuration;
+import com.michaelgrundvig.frc.world.robot.Drivetrain;
 import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
-import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import com.michaelgrundvig.frc.world.robot.Gearing;
-import com.michaelgrundvig.frc.world.robot.ImuMount;
-import com.michaelgrundvig.frc.world.robot.Imus;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Link;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
@@ -36,10 +30,10 @@ import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Output;
 import com.michaelgrundvig.frc.world.robot.Part;
 import com.michaelgrundvig.frc.world.robot.Position;
+import com.michaelgrundvig.frc.world.robot.Preset;
 import com.michaelgrundvig.frc.world.robot.Range;
+import com.michaelgrundvig.frc.world.robot.RevoluteJoint;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
-import com.michaelgrundvig.frc.world.robot.SwerveWiring;
-import java.util.List;
 import org.wpilib.math.geometry.Translation3d;
 import org.wpilib.units.measure.Angle;
 
@@ -64,9 +58,6 @@ import org.wpilib.units.measure.Angle;
 public final class DeltaRobot {
   private DeltaRobot() {}
 
-  /** Meters in an inch: the team's code measures in inches as often as in meters. */
-  private static final double IN = 0.0254;
-
   private static Translation3d point(double x, double y, double z) {
     return new Translation3d(x, y, z);
   }
@@ -85,32 +76,27 @@ public final class DeltaRobot {
    * model's box gives the pitch and roll.
    */
   public static final Body BODY =
-      Body.builder()
-          .frameLength(Inches.of(26))
-          .frameWidth(Inches.of(26))
-          .overallHeight(Inches.of(30))
-          .bumperThickness(Inches.of(3))
-          .bumperBottom(Inches.of(2.5))
-          .bumperTop(Inches.of(5.75))
+      Body.frame(Inches.of(26), Inches.of(26), Inches.of(30))
+          .bumpers(Inches.of(3), Inches.of(2.5), Inches.of(5.75))
           .weight(Pounds.of(137.95))
           .inertia(Body.Turning.yaw(KilogramSquareMeters.of(5.5)))
-          .cg(point(0, 0, 0.2))
-          .build();
+          .cg(point(0, 0, 0.2));
 
   /**
    * Modules of a 5.2734375:1 drive and 26.09:1 steer, coupling 3.375, wheels 2 in
    * (generated/TunerConstants.java:86-90). Their kSpeedAt12Volts, 5.85 m/s (:82), is what a Kraken
-   * X60 with FOC turns the wheel at, free. Kraken X60 drive with FOC (Drive.java:75-76's
-   * PathPlanner motor). Guess: Kraken X44 steer, as Beta's Tuner project has it: Delta's repository
-   * has no Tuner project file, and its simulation's steer motor, an X60 (ModuleIOSim.java:38), is
-   * the template's. Tuner's simulation inertias, 0.01 kg m² each (TunerConstants.java:98-99). The
-   * tread's grip isn't measured, so it's left out and the robot says so, planning on the default,
-   * 1.2: Drive.java:66's 1.2 is the placeholder above, and Constants.java:195's 2.255 is Beta's
-   * PathPlanner tuning value, unread, not the tread's.
+   * X60 with FOC turns the wheel at, free. Kraken X60 drive, run without FOC: their code models it
+   * with FOC (Drive.java:75-76's PathPlanner motor), and the template's robots don't say .foc(),
+   * which needs a Phoenix Pro license. Guess: Kraken X44 steer, as Beta's Tuner project has it:
+   * Delta's repository has no Tuner project file, and its simulation's steer motor, an X60
+   * (ModuleIOSim.java:38), is the template's. Tuner's simulation inertias, 0.01 kg m² each
+   * (TunerConstants.java:98-99). The tread's grip isn't measured, so it's left out and the robot
+   * says so, planning on the default, 1.2: Drive.java:66's 1.2 is the placeholder above, and
+   * Constants.java:195's 2.255 is Beta's PathPlanner tuning value, unread, not the tread's.
    */
-  public static final DrivetrainGeometry.ModuleType MODULES =
-      DrivetrainGeometry.ModuleType.builder()
-          .driveMotor(Motor.KRAKEN_X60_FOC)
+  public static final Drivetrain.Module MODULES =
+      Drivetrain.Module.builder()
+          .driveMotor(Motor.KRAKEN_X60)
           .steerMotor(Motor.KRAKEN_X44)
           .wheelRadius(Inches.of(2))
           .driveGearing(Gearing.of(5.2734375))
@@ -127,117 +113,66 @@ public final class DeltaRobot {
   public static final CanBus CANIVORE = CanBus.canivore("Default Name");
 
   /**
-   * The front left module's wiring, as Tuner X generated it
-   * (generated/TunerConstants.java:137-142): its motors' and its CANcoder's IDs and the CANcoder's
-   * offset, nothing turned around.
+   * The modules at ±10.375 in (generated/TunerConstants.java:144-178), wired as Tuner X generated
+   * them: the Pigeon 2 at ID 1 (:95), then each corner's drive, steer and CANcoder IDs and the
+   * CANcoder's offset (TunerConstants.java:137-175), the right side's drive motors turned around
+   * (:93), nothing else.
+   *
+   * <p>Driven as the template drives one: its defaults, chosen for the simulator, not their Tuner X
+   * values; the stator limits are theirs: the drive's is the slip current, 60 A
+   * (generated/TunerConstants.java:58, subsystems/drive/ModuleIOTalonFX.java:107-110), the
+   * steering's 40 A (TunerConstants.java:70). Its top speed is 4 m/s, which the template has always
+   * driven it at (four fifths of its 6.1 m/s free speed would be 4.9).
    */
-  private static final SwerveWiring.ModuleWiring FRONT_LEFT =
-      SwerveWiring.ModuleWiring.builder()
-          .driveId(23)
-          .steerId(24)
-          .encoderOffset(Rotations.of(0.10693359375))
-          .driveInverted(false)
-          .steerInverted(false)
-          .encoderInverted(false)
-          .encoderId(12)
-          .build();
-
-  /** The front right's, its drive motor turned around, as the right side's are (:93). */
-  private static final SwerveWiring.ModuleWiring FRONT_RIGHT =
-      SwerveWiring.ModuleWiring.builder()
-          .driveId(21)
-          .steerId(22)
-          .encoderOffset(Rotations.of(-0.031494140625))
-          .driveInverted(true)
-          .steerInverted(false)
-          .encoderInverted(false)
-          .encoderId(11)
-          .build();
-
-  /** The back left's. */
-  private static final SwerveWiring.ModuleWiring BACK_LEFT =
-      SwerveWiring.ModuleWiring.builder()
-          .driveId(25)
-          .steerId(26)
-          .encoderOffset(Rotations.of(-0.12939453125))
-          .driveInverted(false)
-          .steerInverted(false)
-          .encoderInverted(false)
-          .encoderId(13)
-          .build();
-
-  /** The back right's, its drive motor turned around. */
-  private static final SwerveWiring.ModuleWiring BACK_RIGHT =
-      SwerveWiring.ModuleWiring.builder()
-          .driveId(27)
-          .steerId(28)
-          .encoderOffset(Rotations.of(-0.38427734375))
-          .driveInverted(true)
-          .steerInverted(false)
-          .encoderInverted(false)
-          .encoderId(14)
-          .build();
+  public static final Drivetrain DRIVETRAIN =
+      Drivetrain.uniform(MODULES, Inches.of(10.375), Inches.of(10.375))
+          .gyro(PIGEON_2.can(CANIVORE, 1))
+          .frontLeft(
+              TALON_FX.can(CANIVORE, 23),
+              TALON_FX.can(CANIVORE, 24),
+              CANCODER.can(CANIVORE, 12).offset(Rotations.of(0.10693359375)))
+          .frontRight(
+              TALON_FX.can(CANIVORE, 21).clockwise(),
+              TALON_FX.can(CANIVORE, 22),
+              CANCODER.can(CANIVORE, 11).offset(Rotations.of(-0.031494140625)))
+          .backLeft(
+              TALON_FX.can(CANIVORE, 25),
+              TALON_FX.can(CANIVORE, 26),
+              CANCODER.can(CANIVORE, 13).offset(Rotations.of(-0.12939453125)))
+          .backRight(
+              TALON_FX.can(CANIVORE, 27).clockwise(),
+              TALON_FX.can(CANIVORE, 28),
+              CANCODER.can(CANIVORE, 14).offset(Rotations.of(-0.38427734375)))
+          .control(
+              DrivetrainControl.defaults()
+                  .withDriveStatorLimit(Amps.of(60))
+                  .withMaxSpeed(MetersPerSecond.of(4)));
 
   /**
-   * The modules at ±10.375 in (generated/TunerConstants.java:144-178), wired as Tuner X generated
-   * them: each corner's drive, steer and CANcoder IDs and the CANcoder's offset
-   * (TunerConstants.java:137-175), the right side's drive motors turned around (:93), the Pigeon 2
-   * at ID 1 (:95).
+   * Guess: its PhotonVision cameras' sensors, the template's typical AprilTag camera, 1280 x 800 at
+   * 30 a second, its field of view, latency and sight range left to the defaults. Each camera's
+   * mount counts as measured and checked, as the template has always taken it: their code's places.
    */
-  public static final DrivetrainGeometry DRIVETRAIN =
-      DrivetrainGeometry.uniform(MODULES, Inches.of(10.375), Inches.of(10.375))
-          .wired(
-              SwerveWiring.builder()
-                  .canBus(CANIVORE)
-                  .driveController(MechanismWiring.Controller.TALON_FX)
-                  .steerController(MechanismWiring.Controller.TALON_FX)
-                  .gyroId(1)
-                  .gyroYawScale(1.0)
-                  .modules(List.of(FRONT_LEFT, FRONT_RIGHT, BACK_LEFT, BACK_RIGHT))
-                  .build());
-
-  /** Guess: its PhotonVision cameras' sensors, the template's typical AprilTag camera. */
-  private static final CameraConfig.Sensor CAMERA =
-      CameraConfig.Sensor.builder()
-          .widthPixels(1280)
-          .heightPixels(800)
-          .fieldOfView(Degrees.of(80))
-          .fieldOfViewAcross(CameraConfig.Across.DIAGONAL)
-          .frameRate(Hertz.of(30))
-          .latency(Milliseconds.of(30))
-          .sightRange(Meters.of(7))
-          .build();
+  private static final CameraConfig.ImageSensor CAMERA =
+      CameraConfig.ImageSensor.of(1280, 800, Hertz.of(30));
 
   /**
    * "Camera6", the left rear (Constants.java:119-127): WPILib's Rotation3d(-2°, -10°, 180.985°),
    * pitch down positive, so tilted up 10°.
    */
   public static final CameraConfig LEFT_REAR =
-      CameraConfig.builder()
-          .name("Camera6")
-          .forward(Inches.of(-10.5))
-          .left(Inches.of(12))
-          .up(Inches.of(21))
+      CameraConfig.of("Camera6", CAMERA)
+          .at(Inches.of(-10.5), Inches.of(12), Inches.of(21))
+          .facing(Degrees.of(10), Degrees.of(180.985))
           .roll(Degrees.of(-2))
-          .tiltUp(Degrees.of(10))
-          .yaw(Degrees.of(180.985))
-          .sensor(CAMERA)
-          .noiseScale(1.0)
-          .build();
+          .measured();
 
   /** "Camera5", the left front (Constants.java:130-138); Beta's is "FrontLeft". */
   public static final CameraConfig LEFT_FRONT =
-      CameraConfig.builder()
-          .name("Camera5")
-          .forward(Inches.of(-7.75))
-          .left(Inches.of(12.25))
-          .up(Inches.of(21))
-          .roll(Degrees.of(0))
-          .tiltUp(Degrees.of(10))
-          .yaw(Degrees.of(23.162))
-          .sensor(CAMERA)
-          .noiseScale(1.0)
-          .build();
+      CameraConfig.of("Camera5", CAMERA)
+          .at(Inches.of(-7.75), Inches.of(12.25), Inches.of(21))
+          .facing(Degrees.of(10), Degrees.of(23.162))
+          .measured();
 
   /**
    * "Camera4", the right rear (Constants.java:141-150): (-11.6875, -12, 16.837) in, turned (0°,
@@ -249,31 +184,17 @@ public final class DeltaRobot {
    * against WPILib's composition.
    */
   public static final CameraConfig RIGHT_REAR =
-      CameraConfig.builder()
-          .name("Camera4")
-          .forward(Inches.of(-10.8353))
-          .left(Inches.of(-11.9853))
-          .up(Inches.of(20.6817))
-          .roll(Degrees.of(0))
-          .tiltUp(Degrees.of(12.5))
-          .yaw(Degrees.of(180.985))
-          .sensor(CAMERA)
-          .noiseScale(1.0)
-          .build();
+      CameraConfig.of("Camera4", CAMERA)
+          .at(Inches.of(-10.8353), Inches.of(-11.9853), Inches.of(20.6817))
+          .facing(Degrees.of(12.5), Degrees.of(180.985))
+          .measured();
 
   /** "Camera3", the right front (Constants.java:153-161). */
   public static final CameraConfig RIGHT_FRONT =
-      CameraConfig.builder()
-          .name("Camera3")
-          .forward(Inches.of(-8.625))
-          .left(Inches.of(-12.25))
-          .up(Inches.of(20.875))
-          .roll(Degrees.of(0))
-          .tiltUp(Degrees.of(8.2))
-          .yaw(Degrees.of(-23.162))
-          .sensor(CAMERA)
-          .noiseScale(1.0)
-          .build();
+      CameraConfig.of("Camera3", CAMERA)
+          .at(Inches.of(-8.625), Inches.of(-12.25), Inches.of(20.875))
+          .facing(Degrees.of(8.2), Degrees.of(-23.162))
+          .measured();
 
   /**
    * The pivot's three angles as Constants.java:88-90 names them: where it reads in (the in-drive
@@ -327,11 +248,18 @@ public final class DeltaRobot {
    * outputs, run until a gate holds; the code then sets 0 V and the brake holds the arm (Pivot.java
    * :26), where the model's idle holds its goal, the pose it came to a stop at. Model: that hold.
    */
-  public static final Joint.Revolute PIVOT =
-      Joint.pivot("pivot", Part.CHASSIS, point(0.25, 0, 0.32), Joint.PITCH_DOWN)
+  public static final RevoluteJoint PIVOT =
+      Joint.pivot("pivot", Part.CHASSIS, Joint.PITCH_DOWN)
+          .at(Meters.of(0.25), Meters.of(0), Meters.of(0.32))
           .range(Range.degrees(0, 135))
           .rest(PIVOT_IN)
-          .carries(Link.box("intake arm", point(0, 0, 0.2), point(0.05, 0.55, 0.36)))
+          .carries(
+              Link.box(
+                  "intake arm",
+                  point(0, 0, 0.2),
+                  Meters.of(0.05),
+                  Meters.of(0.55),
+                  Meters.of(0.36)))
           .positions(PIVOT_IN, PIVOT_OUT)
           .outputs(PIVOT_SWINGING_OUT, PIVOT_SWINGING_IN)
           .motors(Motor.KRAKEN_X60.through(Gearing.of(25)).on(TALON_FX.can(32).clockwise()))
@@ -360,9 +288,16 @@ public final class DeltaRobot {
    * -166, Pivot.java:85-87, PIVOT_RUN_ANGLE at Constants.java:90), which the operator's buttons
    * don't apply (RobotContainer.java:250-252). As an interlock, it holds beneath every command.
    */
-  public static final Joint.Revolute INTAKE =
-      Joint.roller("intake", PIVOT, point(0, 0, 0.35))
-          .carries(Link.box("intake roller", point(0, 0, 0), point(0.05, 0.5, 0.05)))
+  public static final RevoluteJoint INTAKE =
+      Joint.roller("intake", PIVOT)
+          .at(Meters.of(0), Meters.of(0), Meters.of(0.35))
+          .carries(
+              Link.box(
+                  "intake roller",
+                  point(0, 0, 0),
+                  Meters.of(0.05),
+                  Meters.of(0.5),
+                  Meters.of(0.05)))
           .outputs(INTAKING, OUTTAKING)
           .motors(
               Motor.KRAKEN_X60
@@ -382,9 +317,16 @@ public final class DeltaRobot {
    * commands the leader's rotor as the shooter's speed with no ratio anywhere; and where it sits,
    * behind the center at the launch height, 18.33 in (Constants.java:63).
    */
-  public static final Joint.Revolute SHOOTER =
-      Joint.roller("shooter", Part.CHASSIS, point(-0.2, 0, 18.33 * IN))
-          .carries(Link.box("shooter wheels", point(0, 0, 0), point(0.076, 0.5, 0.076)))
+  public static final RevoluteJoint SHOOTER =
+      Joint.roller("shooter", Part.CHASSIS)
+          .at(Meters.of(-0.2), Meters.of(0), Inches.of(18.33))
+          .carries(
+              Link.box(
+                  "shooter wheels",
+                  point(0, 0, 0),
+                  Meters.of(0.076),
+                  Meters.of(0.5),
+                  Meters.of(0.076)))
           .motors(
               Motor.KRAKEN_X60
                   .through(Gearing.of(1))
@@ -412,9 +354,16 @@ public final class DeltaRobot {
    * AutoTarget.java:70), which its motor can't turn it at, so it isn't here: the definition refuses
    * it (DeltaRobotTest.theTargetingFeederSpeed IsRefused). Guess: where.
    */
-  public static final Joint.Revolute FULL_SEND =
-      Joint.roller("full send", Part.CHASSIS, point(-0.1, 0, 0.35))
-          .carries(Link.box("full send rollers", point(0, 0, 0), point(0.05, 0.4, 0.05)))
+  public static final RevoluteJoint FULL_SEND =
+      Joint.roller("full send", Part.CHASSIS)
+          .at(Meters.of(-0.1), Meters.of(0), Meters.of(0.35))
+          .carries(
+              Link.box(
+                  "full send rollers",
+                  point(0, 0, 0),
+                  Meters.of(0.05),
+                  Meters.of(0.4),
+                  Meters.of(0.05)))
           .outputs(FULL_SEND_FEEDING, FULL_SEND_UNJAMMING)
           .motors(Motor.KRAKEN_X60.through(Gearing.of(4)).on(TALON_FX.can(60).clockwise()))
           .control(
@@ -436,9 +385,16 @@ public final class DeltaRobot {
    * at 1000 and 2000 (RobotContainer.java:170, AutoTarget.java:71, RobotTarget.java:39). Guess:
    * where.
    */
-  public static final Joint.Revolute TRANSITION =
-      Joint.roller("transition", Part.CHASSIS, point(0, 0, 0.15))
-          .carries(Link.box("transition rollers", point(0, 0, 0), point(0.05, 0.4, 0.05)))
+  public static final RevoluteJoint TRANSITION =
+      Joint.roller("transition", Part.CHASSIS)
+          .at(Meters.of(0), Meters.of(0), Meters.of(0.15))
+          .carries(
+              Link.box(
+                  "transition rollers",
+                  point(0, 0, 0),
+                  Meters.of(0.05),
+                  Meters.of(0.4),
+                  Meters.of(0.05)))
           .outputs(TRANSITION_FEEDING, TRANSITION_UNJAMMING)
           .motors(Motor.KRAKEN_X60.through(Gearing.of(2)).on(TALON_FX.can(52).clockwise()))
           .control(
@@ -450,73 +406,30 @@ public final class DeltaRobot {
    * The driver's feed, both rollers at once, on the right trigger (RobotContainer.java:254-259):
    * the feed that gates on nothing, so the shooter may not be up to speed.
    */
-  public static final Configuration FEEDING =
-      Configuration.of(
-          "feeding", FULL_SEND.at(FULL_SEND_FEEDING), TRANSITION.at(TRANSITION_FEEDING));
+  public static final Preset FEEDING =
+      Preset.of("feeding", FULL_SEND.at(FULL_SEND_FEEDING), TRANSITION.at(TRANSITION_FEEDING));
 
   /** The same backward, on the right bumper (RobotContainer.java:261-266). */
-  public static final Configuration UNJAMMING =
-      Configuration.of(
+  public static final Preset UNJAMMING =
+      Preset.of(
           "unjamming", FULL_SEND.at(FULL_SEND_UNJAMMING), TRANSITION.at(TRANSITION_UNJAMMING));
 
   /**
-   * The robot. Its one IMU is a Pigeon 2 (generated/TunerConstants.java:95), given no mount pose
-   * (TunerConstants.java:74, null configs). Guess: at the center, level. No backup IMU: a 2026
-   * roboRIO robot has no Systemcore's own.
-   */
-  public static final RobotDefinition ROBOT =
-      RobotDefinition.builder()
-          .name("delta")
-          .body(BODY)
-          .drivetrain(DRIVETRAIN)
-          .imus(Imus.builder().gyro(ImuMount.UNCHECKED).build())
-          .cameras(List.of(LEFT_REAR, LEFT_FRONT, RIGHT_REAR, RIGHT_FRONT))
-          .joints(List.of(PIVOT, INTAKE, SHOOTER, FULL_SEND, TRANSITION))
-          .configurations(List.of(FEEDING, UNJAMMING))
-          // No PDH declared: the code reads a REV PDH at 1
-          // (hardware/LoggedPDH.java:31-36)
-          // and sums its channels by mechanism (LoggedPDH.java:111-134), but never says which
-          // motor is on which channel, nor any breaker, so no motor's feed is given.
-          .build();
-
-  /**
-   * The robot as the template's program runs it, its drivetrain driven as the template drives one,
-   * wired as the team's Tuner X generated it. The drive's limits and gains are the template's kind,
-   * chosen for the simulator, not their Tuner X values; the stator limits are theirs: the drive's
-   * is the slip current, 60 A (generated/TunerConstants.java:58, subsystems/drive/
-   * ModuleIOTalonFX.java:107-110), the steering's 40 A (TunerConstants.java:70). The program starts
-   * on it when asked by name, {@code ./gradlew run -Probot=delta}: {@link Robots#current} decides
-   * that.
+   * The robot as the template's program runs it, wired as the team's Tuner X generated it. The
+   * program starts on it when asked by name, {@code ./gradlew run -Probot=delta}: {@link
+   * Robots#current} decides that.
+   *
+   * <p>Its one IMU is the drivetrain's Pigeon 2 (generated/TunerConstants.java:95), given no mount
+   * pose (TunerConstants.java:74, null configs). Guess: at the center, level, as {@code
+   * PIGEON_2.can(...)} takes it. No backup IMU: a 2026 roboRIO robot has no Systemcore's own.
    */
   public static final RobotConfig CONFIG =
-      RobotConfig.builder()
-          .definition(
-              ROBOT.with(
-                  DRIVETRAIN.control(
-                      DrivetrainControl.builder()
-                          .limits(
-                              DrivetrainControl.Limits.builder()
-                                  .driveStatorCurrent(Amps.of(60))
-                                  .driveSupplyCurrent(Amps.of(60))
-                                  .driveSupplyLowerCurrent(Amps.of(40))
-                                  .driveSupplyLowerTime(Seconds.of(1))
-                                  .steerStatorCurrent(Amps.of(40))
-                                  .maxLinearSpeed(MetersPerSecond.of(4.0))
-                                  .maxAngularSpeed(RotationsPerSecond.of(1))
-                                  .build())
-                          .gains(
-                              DrivetrainControl.Gains.builder()
-                                  .driveKs(0.0)
-                                  .driveKv(MODULES.idealDriveKv())
-                                  .driveKp(2.0)
-                                  .steerKp(16.0)
-                                  .steerKd(0.08)
-                                  .skewLookahead(Seconds.of(0.03))
-                                  .headingKp(5.0)
-                                  .translationKp(3.0)
-                                  .build())
-                          .build())))
-          .vision(VisionConfig.DEFAULTS)
-          .estimator(EstimatorConfig.DEFAULTS)
-          .build();
+      RobotConfig.of(
+          // No PDH declared: the code reads a REV PDH at 1 (hardware/LoggedPDH.java:31-36)
+          // and sums its channels by mechanism (LoggedPDH.java:111-134), but never says which
+          // motor is on which channel, nor any breaker, so no motor's feed is given.
+          RobotDefinition.of("delta", BODY, DRIVETRAIN)
+              .withCameras(LEFT_REAR, LEFT_FRONT, RIGHT_REAR, RIGHT_FRONT)
+              .withJoints(PIVOT, INTAKE, SHOOTER, FULL_SEND, TRANSITION)
+              .withPresets(FEEDING, UNJAMMING));
 }

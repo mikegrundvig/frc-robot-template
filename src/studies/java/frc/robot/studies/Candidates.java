@@ -85,7 +85,8 @@ public final class Candidates {
    *
    * @param mostCameras layouts of more cameras than this are left out
    */
-  public static List<Candidate> family(Body body, CameraConfig.Sensor sensor, int mostCameras) {
+  public static List<Candidate> family(
+      Body body, CameraConfig.ImageSensor sensor, int mostCameras) {
     List<Layout> layouts = new ArrayList<>();
     layouts.add(new Layout("1 camera: ahead", List.of(FRONT)));
     for (Angle splay : SPLAYS) {
@@ -129,17 +130,12 @@ public final class Candidates {
           List<CameraConfig> cameras = new ArrayList<>();
           for (Spot spot : layout.spots()) {
             cameras.add(
-                CameraConfig.builder()
-                    .name(spot.name())
-                    .forward(forward.times(spot.ahead()))
-                    .left(left.times(spot.left()))
-                    .up(height)
+                CameraConfig.of(spot.name(), sensor)
+                    .at(forward.times(spot.ahead()), left.times(spot.left()), height)
+                    .facing(tilt, Degrees.of(spot.yawDegrees()))
                     .roll(Degrees.of(0))
-                    .tiltUp(tilt)
-                    .yaw(Degrees.of(spot.yawDegrees()))
-                    .sensor(sensor)
                     .noiseScale(1.0)
-                    .build());
+                    .measured());
           }
           family.add(
               new Candidate(

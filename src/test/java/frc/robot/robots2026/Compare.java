@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.Joint;
+import com.michaelgrundvig.frc.world.robot.RevoluteJoint;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import org.wpilib.math.geometry.Transform3d;
 
@@ -26,7 +27,7 @@ final class Compare {
    */
   static double kV(RobotMath math, Joint joint, double turnsPerJointTurn) {
     double perUnit = math.idealGains(joint).kV();
-    double perJointTurn = joint instanceof Joint.Revolute ? perUnit * 2 * Math.PI : perUnit;
+    double perJointTurn = joint instanceof RevoluteJoint ? perUnit * 2 * Math.PI : perUnit;
     return perJointTurn / turnsPerJointTurn;
   }
 

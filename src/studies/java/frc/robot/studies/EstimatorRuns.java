@@ -3,7 +3,8 @@ package frc.robot.studies;
 import com.michaelgrundvig.frc.localization.DrivetrainReadings;
 import com.michaelgrundvig.frc.localization.ImuReadings;
 import com.michaelgrundvig.frc.localization.LoopContext;
-import com.michaelgrundvig.frc.localization.VisionDecision;
+import com.michaelgrundvig.frc.localization.MeasurementVerdict;
+import com.michaelgrundvig.frc.localization.PoseCovariance;
 import com.michaelgrundvig.frc.localization.VisionMeasurement;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
 import com.michaelgrundvig.frc.runtime.ExampleRobot;
@@ -19,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.LongFunction;
 import org.wpilib.math.geometry.Pose2d;
@@ -239,6 +241,9 @@ final class EstimatorRuns {
    * @param samplesPerLoop how many wheel readings a loop brought, on average
    * @param loops every loop's inputs, when they were asked for; otherwise none
    * @param start where the robot was placed
+   * @param firstDoubted by camera, how long after the robot was enabled the robot's mount check
+   *     first doubted it (what raises its "out of calibration" alert), in seconds; infinite if it
+   *     never did, and negative if it did while the robot stood disabled
    */
   record Played(
       Map<String, EstimatorScores.Measures> measures,
@@ -251,7 +256,8 @@ final class EstimatorRuns {
       int misreads,
       double samplesPerLoop,
       List<EstimatorCost.Loop> loops,
-      Pose2d start) {}
+      Pose2d start,
+      Map<String, Double> firstDoubted) {}
 
   /** The estimators WPILib's is run as, in the report's order. */
   static List<WpilibContender> contenders() {
@@ -291,7 +297,12 @@ final class EstimatorRuns {
 
   /** Plays a scenario with a seed. */
   static Played play(Scenario scenario, long seed) {
-    return play(scenario, seed, false, CameraConditions.NOMINAL);
+    return play(scenario, seed, StudyRobot.AS_BUILT);
+  }
+
+  /** Plays a scenario with a seed, on a robot with this software and localizer. */
+  static Played play(Scenario scenario, long seed, StudyRobot studied) {
+    return play(scenario, seed, false, CameraConditions.NOMINAL, studied);
   }
 
   /**
@@ -300,7 +311,7 @@ final class EstimatorRuns {
    * @param keepLoops whether every loop's inputs are kept, to cost the estimators by
    */
   static Played play(Scenario scenario, long seed, boolean keepLoops) {
-    return play(scenario, seed, keepLoops, CameraConditions.NOMINAL);
+    return play(scenario, seed, keepLoops, CameraConditions.NOMINAL, StudyRobot.AS_BUILT);
   }
 
   /**
@@ -308,9 +319,14 @@ final class EstimatorRuns {
    * scenario does.
    *
    * @param keepLoops whether every loop's inputs are kept, to cost the estimators by
+   * @param studied the software the robot's cameras run, and the localizer it chose
    */
   static Played play(
-      Scenario scenario, long seed, boolean keepLoops, CameraConditions cameraConditions) {
+      Scenario scenario,
+      long seed,
+      boolean keepLoops,
+      CameraConditions cameraConditions,
+      StudyRobot studied) {
     List<EstimatorCost.Loop> kept = new ArrayList<>();
     Pose2d start = Pose2d.ZERO;
     EstimatorRig.Cameras cameras =
@@ -323,12 +339,13 @@ final class EstimatorRuns {
     for (WpilibContender contender : contenders) {
       tracks.put(contender.name(), new EstimatorScores.Track());
     }
+    Map<String, Double> firstDoubted = new LinkedHashMap<>();
     int samples = 0;
     int oursOffered = 0;
     int oursAccepted = 0;
     SensorErrors errors = cameraConditions.on(scenario.errors().apply(seed), seed);
     try (SimulatedRobot robot =
-        new SimulatedRobot(cameraConditions.robot(), errors, cameras::watch)) {
+        new SimulatedRobot(studied.on(cameraConditions.robot()), errors, cameras::watch)) {
       Stage stage = new Stage(robot, cameras, marks, contenders);
       int disabledLoops = RobotLoop.loops(DISABLED_SECONDS);
       int loops = disabledLoops + RobotLoop.loops(scenario.route().seconds());
@@ -371,16 +388,22 @@ final class EstimatorRuns {
           }
         }
         ImuReadings imu = EstimatorRig.imu(readings);
-        List<VisionDecision> decisions = robot.visionDecisions();
+        List<MeasurementVerdict> verdicts = robot.measurementVerdicts();
         List<VisionMeasurement> measurements = robot.visionMeasurements();
         List<WpilibContender.Image> images = cameras.drain();
-        oursOffered += decisions.size();
-        oursAccepted += (int) decisions.stream().filter(VisionDecision::accepted).count();
+        oursOffered += verdicts.size();
+        oursAccepted += (int) verdicts.stream().filter(MeasurementVerdict::accepted).count();
         if (keepLoops) {
           kept.add(new EstimatorCost.Loop(now, stage.enabled, readings, measurements, images));
         }
+        noteFirstDoubts(robot, seconds, firstDoubted);
         Pose2d truth = robot.truePose();
-        track(tracks, OURS).add(robot.pose(), truth, robot.estimate().covariance());
+        Optional<PoseCovariance> claimed = robot.covariance();
+        if (claimed.isPresent()) {
+          track(tracks, OURS).add(robot.pose(), truth, claimed.get());
+        } else {
+          track(tracks, OURS).add(robot.pose(), truth);
+        }
         for (WpilibContender contender : contenders) {
           contender.imu(imu.yawRateRadiansPerSecond(), imu.pitchRadians(), imu.rollRadians());
           if (contender.feed() == WpilibContender.Feed.SAME_INPUTS) {
@@ -416,7 +439,20 @@ final class EstimatorRuns {
           cameras.misreads(),
           (double) samples / loops,
           kept,
-          start);
+          start,
+          firstDoubted);
+    }
+  }
+
+  /** Notes the moment each camera the robot's mount check doubts was first doubted. */
+  private static void noteFirstDoubts(
+      SimulatedRobot robot, double seconds, Map<String, Double> firstDoubted) {
+    for (String camera : robot.cameraNames()) {
+      firstDoubted.putIfAbsent(camera, Double.POSITIVE_INFINITY);
+      boolean doubtedNow = robot.mountDoubtMeters(camera) > 0;
+      if (doubtedNow && firstDoubted.get(camera) == Double.POSITIVE_INFINITY) {
+        firstDoubted.put(camera, seconds);
+      }
     }
   }
 

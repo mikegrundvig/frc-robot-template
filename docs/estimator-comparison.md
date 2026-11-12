@@ -6,9 +6,10 @@ the simulator's true pose. It answers one question: is the robot's estimator bet
 built-in one, by how much, and where is it worse?
 
 It is a study, not a test: it runs outside `ci`, and no test demands that either estimator wins.
-The one test (`EstimatorStudyTest`) checks that the study runs and that every estimator agrees with
-the truth when the wheels and IMUs are exact, which is what catches a wrong unit, clock, or reset
-in how WPILib's estimator is fed.
+`EstimatorStudyTest` checks that the study runs and that every estimator agrees with the truth when
+the wheels and IMUs are exact, which is what catches a wrong unit, clock, or reset in how WPILib's
+estimator is fed. `EstimatorStressSimTest` holds the robot's own estimator to what the study
+recorded for it under a few stresses (below), so a change that makes one far worse fails `ci`.
 
 ```
 ./gradlew estimatorStudy                                         every scenario, 20 seeds
@@ -17,9 +18,18 @@ in how WPILib's estimator is fed.
 ./gradlew estimatorStudy --args="--trace --cost"                 loop-by-loop traces, and each estimator's cost
 ./gradlew estimatorStudy --args="--holdout --seed=101"           the held-out set, on seeds of its own
 ./gradlew estimatorStudy --args="--cameras=pessimistic"          the same, with worse cameras (below)
+./gradlew estimatorStudy --args="--software=visor"               the robot's cameras on Visor
+./gradlew estimatorStudy --args="--localizer=wpilib"             the robot on WPILib's estimator
 ```
 
-Every scenario at 20 seeds is 820 simulated robots, more than one program's memory holds under a
+**Which robot is A.** A is the example robot, on PhotonVision's cameras and the default localizer,
+unless asked otherwise. `--software=visor` puts every camera on Visor, which sends each tag of an
+image with its own pose and never a multi-tag solution, through the simulator's Visor path.
+`--localizer=wpilib` has the robot choose `WpilibLocalizer`, as a team does in one line: its images
+are then solved from their tags alone, and A claims no uncertainty. WPILib's contenders run beside
+it as always.
+
+Every scenario at 20 seeds is 860 simulated robots, more than one program's memory holds under a
 2 GB heap: run it a few scenarios at a time, each to its own `--out`, and put the results together
 with `--args="--merge=DIR,DIR,... --out=DIR"`.
 
@@ -125,6 +135,10 @@ page applies them. Two are the study's: a camera that reads a tag as another tag
 a tag's two poses the wrong way round. Both change what the camera sends, so A's pipeline and every
 other estimator get the same wrong image.
 
+Two scenarios set the robot down on its start facing away from the start's heading, which it
+believes: `off-heading-30`, 30° off, as a robot set down crooked in the pit or on a practice field,
+and `off-heading-180`, backwards. It stands where the start is; only the heading is wrong.
+
 Five scenarios check whether a verdict hangs on the simulator's own idea of error. They drive the
 clean match with each camera a little off its mount and each tag a little off the layout (errors
 that repeat, and that cameras share), with those doubled, with the tags alone off, with the mounts
@@ -188,7 +202,7 @@ and outposts standing, which hide tags from the cameras.
 
 | | Ours ahead | The same | WPILib's ahead |
 |---|---|---|---|
-| Tuning set, 41 scenarios, 195 comparisons | 33 | 153 | 9 |
+| Tuning set, 41 scenarios (before the two off-heading ones), 195 comparisons | 33 | 153 | 9 |
 | Held-out set, 19 scenarios, 87 comparisons | 11 | 70 | 6 |
 | Worse cameras (`--cameras=pessimistic`), tuning set | 58 | 129 | 8 |
 | Worse cameras, held-out set | 19 | 65 | 3 |
@@ -219,8 +233,9 @@ driving and lost ground in a few faults.
 
 **Each camera's turn on its mount, learned.** The estimator now keeps each camera's turn on its
 mount in its state and learns it as the robot drives (the localization README says how). The
-turn starts as unsure as the camera's mount tolerance in the robot's description (left out, 5 mm
-and 1°, a mount measured from CAD and checked). The gyro tells the cameras' turns apart from one
+turn starts as unsure as the camera's mount tolerance in the robot's description (25 mm and 3°
+for a mount nobody has checked, 5 mm and 1° for one measured from CAD and checked with the mount
+procedure; the example robot's cameras are the checked kind). The gyro tells the cameras' turns apart from one
 another; what they share is carried, never corrected, since only the wheels could tell it from a
 heading error and a wheel's own steady error would be learned in its place. A camera whose
 headings turn all at once has its turn opened up and learned anew. Before, each turn was taken as
@@ -347,6 +362,53 @@ drifting, 8%.
 
 Ours costs more to run: a median of 14 µs a loop (10 µs before it learned the cameras' turns) and
 2.6 kB allocated a loop, against 2.9 µs for WPILib's filter given measurements already solved.
+
+### Visor's cameras, WPILib's estimator as the robot, and a robot set down off its heading
+
+Run 2026-11-10, ten seeds of each scenario (seeds 1 to 10), the cameras as the simulator has them.
+Visor's cameras send each tag with its own pose and no multi-tag solution, so on Visor the only
+headings the cameras give are single tags'. A robot that chose `WpilibLocalizer` has every image
+solved from its tags alone. Position error RMS, and how long after the robot was set down until it
+is within 5 cm and 1° and stays ("never" if not within the run):
+
+| A is | Scenario | Before | After |
+|---|---|---|---|
+| The default localizer, PhotonVision | Clean | 0.7 cm | 0.7 cm |
+| | Set down 30° off | 0.7 cm, 0.1 s | 0.7 cm, 0.1 s |
+| | Set down backwards | 218 cm, 21 s | 0.7 cm, 0.1 s |
+| | Placed 0.5 m and 15° wrong | 3.3 cm, 0.15 s | 3.3 cm, 0.15 s |
+| The default localizer, Visor | Clean | 0.7 cm | 0.7 cm |
+| | Set down 30° off | 138 cm, 20 s | 0.8 cm, 0.2 s |
+| | Set down backwards | 543 cm, never | 0.8 cm, 0.2 s |
+| | Placed 0.5 m and 15° wrong | 34 cm, 6.0 s | 3.9 cm, 0.3 s |
+| WPILib's, PhotonVision | Clean | 0.9 cm | 0.9 cm |
+| | Set down 30° off, backwards | 0.9 cm, 0.4 s; 0.9 cm, 0.6 s | the same |
+| WPILib's, Visor | Clean | 1.5 cm | 1.5 cm |
+| | Set down 30° off, backwards | 1.5 cm, 1.3 s; 1.6 cm, 1.7 s | the same |
+
+What changed is the default localizer's: a placement's heading is now a person's word, as a
+driver's heading reset is. No image is solved with it until a camera's own heading agrees with it,
+and a camera's heading that disagrees counts against it, never averaged with it, so three that
+agree turn the estimate. Agreeing is within 5°, or within three spreads of the estimate's doubt of
+the heading that camera sees (the placement's 2° and the camera's mount's tolerance together),
+whichever is wider: a camera a few degrees off on its mount, alone with its tags, no longer turns a
+right placement to its own heading. Before, the placement was trusted to its 2°: every image was solved with
+the wrong heading, its positions landed off and were refused, and the recovery moved the position
+and left the heading wrong. Visor gave it no heading to turn by. With the cameras on Visor the
+stresses below came out the same before and after (wheel slip 0.7 cm, a knocked camera 1.7 cm, a
+clock 20 ms off 1.4 cm, two cameras 1.2 cm, every range 2% long 6.8 cm).
+
+WPILib's estimator keeps a single tag's heading at the pipeline's standard deviation. On Visor that
+is what corrects a wrong heading at all: behind the strong teams' filter, which ignores one tag's
+heading (`C.03gyro`), it never does, staying 30° off when set down 30° off (60 cm RMS), and it is
+2.0 cm off in clean driving against 1.5 cm with the single tags' headings kept.
+
+**The gates.** `EstimatorStressSimTest` plays one seed of each stress for the default localizer and
+holds its position RMS and 95th percentile to twice these medians plus a centimeter: wheel slip,
+the knocked camera (and the robot's mount check doubts that camera, and no other, within 12 s of
+the knock: it did 10.1 to 10.2 s after on every seed), two cameras unplugged, every range 2% long,
+a clock 20 ms off, and the robot set down 30° off and backwards on PhotonVision and on Visor, each
+recovering within a second without a driver's reset.
 
 ## What it can't make equal
 

@@ -3,7 +3,6 @@ package frc.robot.robots2026;
 import static frc.robot.DeltaRobot.BODY;
 import static frc.robot.DeltaRobot.DRIVETRAIN;
 import static frc.robot.DeltaRobot.MODULES;
-import static frc.robot.DeltaRobot.ROBOT;
 import static frc.robot.robots2026.Compare.SANITY_HIGH;
 import static frc.robot.robots2026.Compare.SANITY_LOW;
 import static frc.robot.robots2026.Compare.freeRpm;
@@ -28,14 +27,16 @@ import com.michaelgrundvig.frc.world.config.Finding.Scope;
 import com.michaelgrundvig.frc.world.game.Rebuilt;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.BodyBuilder;
-import com.michaelgrundvig.frc.world.robot.Configuration;
 import com.michaelgrundvig.frc.world.robot.Drive;
-import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
+import com.michaelgrundvig.frc.world.robot.Drivetrain;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Output;
 import com.michaelgrundvig.frc.world.robot.Position;
+import com.michaelgrundvig.frc.world.robot.Preset;
+import com.michaelgrundvig.frc.world.robot.RevoluteJoint;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
@@ -55,6 +56,9 @@ import org.wpilib.units.measure.Mass;
  * ({@link BetaRobotTest}) is tested as Delta's; what is Beta's, copied, is not tested again.
  */
 class DeltaRobotTest {
+  /** The robot as its program runs it. */
+  private static final RobotDefinition ROBOT = DeltaRobot.CONFIG.definition();
+
   /** The robot's mass as the program takes it: as weighed. */
   private static final Mass MASS = Rebuilt.LIMITS.robotMass(BODY);
 
@@ -75,7 +79,8 @@ class DeltaRobotTest {
    */
   @Test
   void theSimulatorsRobotKeepsTheirWiring() {
-    assertThat(DeltaRobot.CONFIG.definition().drivetrain()).isEqualTo(ROBOT.drivetrain());
+    assertThat(DeltaRobot.CONFIG.definition().drivetrain().sameHardwareAs(ROBOT.drivetrain()))
+        .isTrue();
     assertThat(DeltaRobot.CONFIG.drivetrainWiring()).isEqualTo(ROBOT.drivetrain().wiring());
     assertThat(DeltaRobot.CONFIG.drivetrain().gains().steerKp()).isEqualTo(16.0);
     assertThat(ROBOT.drivetrain().wheelCoefficientOfFriction()).isEqualTo(1.2);
@@ -89,7 +94,7 @@ class DeltaRobotTest {
    */
   @Test
   void theSwerveModulesAreTunersOwn() {
-    DrivetrainGeometry.ModuleJoints frontLeft = DRIVETRAIN.joints().get(0);
+    Drivetrain.ModuleJoints frontLeft = DRIVETRAIN.joints().get(0);
     Sensor.Encoder cancoder =
         JointFixtures.absoluteEncoder("front-left cancoder", frontLeft.steer(), CANCODER_COUNTS);
     Sensor.Encoder rotor = frontLeft.drive().rotor();
@@ -117,7 +122,7 @@ class DeltaRobotTest {
             ROBOT.moduleTranslations()[0].getDistance(new Translation2d(10.375 * IN, 10.375 * IN)))
         .isLessThan(1e-12);
     assertThat(DRIVETRAIN.wiring().orElseThrow().canBus()).isEqualTo(DeltaRobot.CANIVORE);
-    assertThat(DRIVETRAIN.wiring().orElseThrow().gyroId()).isEqualTo(1);
+    assertThat(DRIVETRAIN.wiring().orElseThrow().gyro().id()).isEqualTo(1);
   }
 
   /**
@@ -127,7 +132,7 @@ class DeltaRobotTest {
    */
   @Test
   void theSteeringIsSeededFromItsOwnMotor() {
-    DrivetrainGeometry.ModuleJoints frontLeft = DRIVETRAIN.joints().get(0);
+    Drivetrain.ModuleJoints frontLeft = DRIVETRAIN.joints().get(0);
     RobotMath corner =
         RobotMath.of(
             BODY,
@@ -143,13 +148,15 @@ class DeltaRobotTest {
 
   /**
    * kSpeedAt12Volts, 5.85 m/s (TunerConstants.java:82), is what the motors and gearing reach, free,
-   * to a few thousandths: unlike Beta's, which asked for more than its drive has.
+   * with FOC, to a few thousandths. The template runs them without FOC, so they reach 6.05 m/s: the
+   * tuner's speed is 0.2 m/s under the drive's, never over it as Beta's is.
    */
   @Test
-  void theTunersSpeedAt12VoltsIsWhatTheMotorsReach() {
+  void theTunersSpeedAt12VoltsIsTheFocSpeedUnderWhatTheMotorsReach() {
     double free = MODULES.freeSpeed().in(MetersPerSecond);
 
-    assertThat(free).isCloseTo(5.85, within(0.005));
+    assertThat(free).isCloseTo(6.053, within(0.005));
+    assertThat(5.85).isLessThan(free);
     assertThat(3.25).as("the drivers' top speed, Constants.java:45").isLessThan(free);
   }
 
@@ -231,11 +238,9 @@ class DeltaRobotTest {
         .containsExactly(
             tuple("swinging out", Output.Kind.VOLTAGE, 5.0),
             tuple("swinging in", Output.Kind.VOLTAGE, -3.0));
-    assertThat(DeltaRobot.INTAKE.output("outtaking").value() * 60 / (2 * Math.PI))
+    assertThat(RobotMath.output(DeltaRobot.INTAKE, "outtaking").value() * 60 / (2 * Math.PI))
         .isCloseTo(-500, within(1e-9));
-    assertThat(ROBOT.configurations())
-        .extracting(Configuration::name)
-        .containsExactly("feeding", "unjamming");
+    assertThat(ROBOT.presets()).extracting(Preset::name).containsExactly("feeding", "unjamming");
     assertThat(DeltaRobot.FEEDING.joints())
         .containsExactly(DeltaRobot.FULL_SEND, DeltaRobot.TRANSITION);
     assertThat(ROBOT.everyInterlock())
@@ -251,7 +256,7 @@ class DeltaRobotTest {
    */
   @Test
   void theTargetingFeederSpeedIsRefused() {
-    Joint.Revolute targetingFeed =
+    RevoluteJoint targetingFeed =
         withOutputs(
             DeltaRobot.FULL_SEND, Output.rpm("feeding", 5000), Output.rpm("unjamming", -1000));
 
@@ -285,29 +290,25 @@ class DeltaRobotTest {
   }
 
   /**
-   * The interlock holds for every configuration: one that runs the intake's roller with the pivot
-   * stowed is refused, and one that puts the pivot out first is taken.
+   * The interlock holds for every preset: one that runs the intake's roller with the pivot stowed
+   * is refused, and one that puts the pivot out first is taken.
    */
   @Test
-  void aConfigurationThatRunsTheIntakeStowedIsRefused() {
-    Configuration stowed = Configuration.of("intaking", DeltaRobot.INTAKE.at(DeltaRobot.INTAKING));
-    Configuration out =
-        Configuration.of(
+  void aPresetThatRunsTheIntakeStowedIsRefused() {
+    Preset stowed = Preset.of("intaking", DeltaRobot.INTAKE.at(DeltaRobot.INTAKING));
+    Preset out =
+        Preset.of(
             "intaking",
             DeltaRobot.PIVOT.at(DeltaRobot.PIVOT_OUT),
             DeltaRobot.INTAKE.at(DeltaRobot.INTAKING));
 
     assertThatIllegalArgumentException()
         .isThrownBy(
-            () -> RobotDefinitionBuilder.builder(ROBOT).configurations(List.of(stowed)).build())
+            () -> RobotDefinitionBuilder.builder(ROBOT).presets(List.of(stowed)).build().checked())
         .withMessage(
-            "RobotDefinition[delta].configurations: configuration intaking runs intake, but"
+            "RobotDefinition[delta].presets: preset intaking runs intake, but"
                 + " intake runs only when pivot at least 130°, and pivot is at 3°, where it rests");
-    assertThat(
-            RobotDefinitionBuilder.builder(ROBOT)
-                .configurations(List.of(out))
-                .build()
-                .configurations())
+    assertThat(RobotDefinitionBuilder.builder(ROBOT).presets(List.of(out)).build().presets())
         .containsExactly(out);
   }
 
@@ -384,7 +385,7 @@ class DeltaRobotTest {
    */
   @Test
   void thePivotHasNoGravitySeedWithoutAMass() {
-    RobotMath.Gains gains = math.idealGains(DeltaRobot.PIVOT);
+    RobotMath.Feedforward gains = math.idealGains(DeltaRobot.PIVOT);
     double rotor = Motor.KRAKEN_X60.rotorInertia().in(KilogramSquareMeters) * 25 * 25;
 
     assertThat(gains.kG()).isZero();
@@ -406,7 +407,17 @@ class DeltaRobotTest {
     List<Finding> notes =
         ROBOT.findings(MASS).stream()
             .filter(finding -> finding.level() == Finding.Level.NOTE)
+            .filter(finding -> !finding.message().startsWith("camera "))
             .toList();
+    // Each camera leaves its noise scale, latency, field of view and sight range to the defaults,
+    // and all but the one rolled its roll: one note each, the robot's, which names what the
+    // simulator reads too.
+    assertThat(ROBOT.findings(MASS))
+        .filteredOn(finding -> finding.message().startsWith("camera "))
+        .allSatisfy(note -> assertThat(note.message()).contains("In the simulator alone, "))
+        .extracting(Finding::scope)
+        .containsOnly(Scope.ROBOT)
+        .hasSize(ROBOT.cameras().size());
 
     assertThat(notes)
         .extracting(Finding::message, Finding::scope)
@@ -420,6 +431,10 @@ class DeltaRobotTest {
                     + " bumpers and battery: carried as one rigid body",
                 Scope.SIMULATOR),
             tuple(
+                "the robot has no backup IMU: with the gyro lost, its heading rests on the wheels"
+                    + " alone: give Systemcore's, .backupImu(ImuMount.UNCHECKED), once it has one",
+                Scope.ROBOT),
+            tuple(
                 "the tread's grip isn't measured: it's 1.2, PathPlanner's default: drive moves"
                     + " plan their acceleration on it, and the slip check judges by it: measure it"
                     + " with a pull test (docs/characterization.md, tread friction)",
@@ -430,8 +445,9 @@ class DeltaRobotTest {
                 Scope.SIMULATOR),
             tuple(
                 "pivot has no kG: it holds against gravity by kP alone, so it sits below its"
-                    + " targets until its kG is tuned and written, withKg(...), or written as 0"
-                    + " for a counterbalanced joint",
+                    + " targets until its kG is tuned and written: withKg(k) for a joint level at"
+                    + " its zero, withKg(k, angle) with the angle its weight pulls hardest at for"
+                    + " one that isn't, or 0 for a counterbalanced joint",
                 Scope.ROBOT),
             tuple(
                 "intake roller has no mass: intake roller adds nothing to intake's inertia, so its"
@@ -451,6 +467,7 @@ class DeltaRobotTest {
     assertThat(notes)
         .extracting(Finding::subject)
         .containsExactly(
+            "delta",
             "delta",
             "delta",
             "delta",
@@ -477,11 +494,11 @@ class DeltaRobotTest {
 
   /** A joint's own motors, from its block. */
   private static Drive motors(Joint joint) {
-    return joint.ownDrives().getFirst();
+    return RobotMath.ownDrives(joint).getFirst();
   }
 
   /** A joint's own absolute encoder, from its block. */
   private static Sensor.Encoder absolute(Joint joint) {
-    return (Sensor.Encoder) joint.ownSensors().getFirst();
+    return (Sensor.Encoder) RobotMath.ownSensors(joint).getFirst();
   }
 }

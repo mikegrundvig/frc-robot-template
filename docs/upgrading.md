@@ -26,8 +26,8 @@ The runtime, the robot model, localization and Pitwall are repositories of their
 together as one dated release (such as `2026.10.20`) to their Maven repository,
 [mikegrundvig.github.io/frc-maven](https://mikegrundvig.github.io/frc-maven/), which lists every
 release. This build names the release in one line, `frc-libs` in `gradle/libs.versions.toml`;
-the runtime brings the rest, and its Gradle plugins (AdvantageScope's assets) are published with it
-at the same version. Releases are pre-release: anything may change from one to the next, so read
+the runtime brings the rest, and its Gradle plugins (AdvantageScope's assets, and Visor's release
+and Spotter pack) are published with it at the same version. Releases are pre-release: anything may change from one to the next, so read
 the libraries' commits before moving.
 
 **To move to a new release,** change `frc-libs` to it, then write the checksums again
@@ -35,10 +35,13 @@ the libraries' commits before moving.
 
 The runtime is built and tested against one GradleRIO version and one set of vendor libraries, and
 this build runs it with its own, so the two must be the same versions. The runtime's jar says which
-it was built with (`META-INF/frc-robot-runtime/built-with.json`), and the build's
+it was built with (`META-INF/frc-robot-runtime/built-with.json`), and each of the model's,
+localization's and Pitwall's says which modules it was compiled against and leaves to the program
+(WPILib's, AdvantageKit's, and what comes with them, such as ejml), each at its version. The build's
 `checkRuntimeVersions` task (part of `check`, so of `ci`) compares GradleRIO's version
-(`gradlerio`) and each of those vendor libraries, by its uuid, with `vendordeps/`, and fails, listing
-each difference, until they agree. So a WPILib upgrade waits for a release of the libraries built
+(`gradlerio`), each of the runtime's vendor libraries, by its uuid, with `vendordeps/`, and each of
+those modules with the version this program runs, and fails, listing each difference, until they
+agree. So a WPILib upgrade waits for a release of the libraries built
 for it: move `frc-libs` to that release along with the steps below, and `ci` passes once both are
 done.
 

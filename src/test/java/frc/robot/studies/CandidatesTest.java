@@ -60,9 +60,9 @@ class CandidatesTest {
     assertThat(corners.cameras())
         .extracting(
             camera -> camera.name(),
-            camera -> rounded(camera.forward().in(Inches)),
-            camera -> rounded(camera.left().in(Inches)),
-            camera -> rounded(camera.yaw().in(Degrees)))
+            camera -> rounded(camera.forward().orElseThrow().in(Inches)),
+            camera -> rounded(camera.left().orElseThrow().in(Inches)),
+            camera -> rounded(camera.yaw().orElseThrow().in(Degrees)))
         .containsExactly(
             tuple("front-left", 12.25, 12.25, 30.0),
             tuple("front-right", 12.25, -12.25, -30.0),

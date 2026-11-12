@@ -183,6 +183,31 @@ class EstimatorStudyTest {
     assertThatThrownBy(() -> run("--scenarios=dancing")).hasMessageContaining("The scenarios:");
     assertThatThrownBy(() -> run("--seeds=many")).hasMessageContaining("must be a number");
     assertThatThrownBy(() -> run("--seeds=0")).hasMessageContaining("1 or more");
+    assertThatThrownBy(() -> run("--software=film"))
+        .hasMessageContaining("--software must be photonvision or visor: film");
+    assertThatThrownBy(() -> run("--localizer=sextant"))
+        .hasMessageContaining("--localizer must be default or wpilib: sextant");
+  }
+
+  /**
+   * The robot the study runs as A can be another: on Visor's cameras, which send no multi-tag
+   * solution, so that WPILib's estimator behind the strong teams' filter, which ignores one tag's
+   * heading, never has a heading from the cameras; and on WPILib's estimator, which claims nothing.
+   */
+  @Test
+  void theRobotCanRunVisorCamerasAndWpilibsEstimator() {
+    StudyRobot visorOnWpilib = new StudyRobot(StudyRobot.Software.VISOR, StudyRobot.Choice.WPILIB);
+    assertThat(visorOnWpilib.describe()).isEqualTo("Visor cameras, WPILib's pose estimator");
+    assertThat(StudyRobot.named("photonvision", "default")).isEqualTo(StudyRobot.AS_BUILT);
+
+    EstimatorRuns.Played played =
+        EstimatorRuns.play(EstimatorScenarios.named("off-heading-30"), 2, visorOnWpilib);
+
+    assertThat(of(played, "A").rmsMeters()).isFinite();
+    assertThat(of(played, "A").positionBeyondClaim()).as("WPILib's claims nothing").isNaN();
+    assertThat(of(played, "C").restNearDegrees())
+        .as("no image corrects C's heading: the 30° stays")
+        .isGreaterThan(25);
   }
 
   /** A verdict is "same" unless the medians differ by more than the seeds do. */

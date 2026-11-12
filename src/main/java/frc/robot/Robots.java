@@ -5,7 +5,7 @@ import com.michaelgrundvig.frc.runtime.ExampleRobot;
 import com.michaelgrundvig.frc.runtime.RobotConfig;
 import com.michaelgrundvig.frc.runtime.autos.Autos;
 import com.michaelgrundvig.frc.runtime.behavior.RecordingGamepad;
-import com.michaelgrundvig.frc.runtime.subsystems.drive.Drive;
+import com.michaelgrundvig.frc.runtime.subsystems.drive.SwerveDrive;
 import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.Joints;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import java.util.List;
@@ -16,10 +16,9 @@ import org.wpilib.command3.Scheduler;
  * The team's robots, one {@link RobotConfig} each. A test builds every one, so an invalid value
  * fails the build rather than the robot.
  *
- * <p>Every value is set by name through a builder, which asks in turn for each one the robot can't
- * do without: none can be left out or land in the wrong place. What a robot may not have (a PDH,
- * its joints, a camera's joint, a center of gravity) comes after them, given as itself ({@code
- * .pdh(Pdh.can(1))}), or is left out.
+ * <p>Every value starts from what it can't do without ({@code RobotDefinition.of(name, body,
+ * drivetrain)}, {@code Body.frame(length, width, height)}), and the rest is said by a verb each,
+ * given as itself ({@code .withPdh(Pdh.can(1))}, {@code .cg(...)}), or is left out.
  *
  * <p>The guide's robot ({@link ExampleRobot}, in the runtime) is a typical competition build, at
  * the 2026 rule maximums where the rules set one. Describe your robot here as you design and
@@ -30,9 +29,9 @@ import org.wpilib.command3.Scheduler;
  *
  * <p>A robot's mechanisms are written here too, each joint in one block: where it is, its named
  * places and outputs, its motors and their wiring, its own sensors, how the program drives it, and
- * its interlocks, which hold beneath every command. The configurations the robot takes name the
- * joints and their places. The template runs the guide's robot, {@link ExampleRobot}, until you
- * replace it with your own ({@link #current}), and with it that robot's buttons and autos, {@link
+ * its interlocks, which hold beneath every command. The presets the robot takes name the joints and
+ * their places. The template runs the guide's robot, {@link ExampleRobot}, until you replace it
+ * with your own ({@link #current}), and with it that robot's buttons and autos, {@link
  * ExampleControls}; your own behavior goes in {@link Controls} ({@link #controls}). The guide's
  * robot's intake reads:
  *
@@ -141,7 +140,7 @@ public final class Robots {
       Scheduler scheduler,
       RobotDefinition robot,
       Joints joints,
-      Drive drive,
+      SwerveDrive drive,
       RecordingGamepad driver,
       RecordingGamepad operator,
       Autos autos) {

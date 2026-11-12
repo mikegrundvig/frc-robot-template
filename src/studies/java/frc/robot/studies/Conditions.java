@@ -3,7 +3,7 @@ package frc.robot.studies;
 import static com.michaelgrundvig.frc.world.config.Rules.nonNegative;
 import static com.michaelgrundvig.frc.world.config.Rules.positive;
 
-import com.michaelgrundvig.frc.runtime.subsystems.vision.VisionSim;
+import com.michaelgrundvig.frc.runtime.sim.VisionSim;
 import com.michaelgrundvig.frc.simulation.Seeds;
 import com.michaelgrundvig.frc.world.config.Checks;
 import java.util.Locale;

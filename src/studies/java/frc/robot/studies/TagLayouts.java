@@ -2,6 +2,8 @@ package frc.robot.studies;
 
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.field.Symmetry;
+import com.michaelgrundvig.frc.world.field.TagLayout;
+import com.michaelgrundvig.frc.world.game.Rebuilt;
 import io.avaje.json.JsonException;
 import io.avaje.jsonb.JsonType;
 import io.avaje.jsonb.Jsonb;
@@ -106,11 +108,15 @@ public final class TagLayouts {
         name, "", "", null, number(size, "length"), number(size, "width"), "frc", tags);
   }
 
-  /** The field model of a layout, with whichever symmetry puts every tag nearest a partner. */
+  /**
+   * The field model of a layout, with whichever symmetry puts every tag nearest a partner. Its tags
+   * are the family and size this season's game prints ({@code Rebuilt.GAME}).
+   */
   public static FieldModel of(Field layout) {
+    TagLayout tags = Rebuilt.GAME.layout(layout);
     FieldModel best = null;
     for (Symmetry symmetry : Symmetry.values()) {
-      FieldModel model = new FieldModel(layout, symmetry, List.of(), List.of(), List.of());
+      FieldModel model = new FieldModel(tags, symmetry, List.of(), List.of(), List.of());
       if (best == null || model.symmetryError() < best.symmetryError()) {
         best = model;
       }

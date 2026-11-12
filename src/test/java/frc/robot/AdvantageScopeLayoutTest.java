@@ -2,7 +2,7 @@ package frc.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.michaelgrundvig.frc.world.bridges.AdvantageScopeAssets;
+import com.michaelgrundvig.frc.world.tools.AdvantageScopeRelease;
 import frc.robot.AdvantageScopeLayoutCheck.Source;
 import io.avaje.jsonb.Jsonb;
 import java.io.IOException;
@@ -55,7 +55,7 @@ class AdvantageScopeLayoutTest {
     String layout = Files.readString(LAYOUT);
 
     assertThat("v" + AdvantageScopeLayoutCheck.version(layout))
-        .isEqualTo(AdvantageScopeAssets.ADVANTAGESCOPE);
+        .isEqualTo(AdvantageScopeRelease.VERSION);
   }
 
   @Test

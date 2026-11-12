@@ -18,6 +18,7 @@ import frc.robot.studies.EstimatorRuns.Stage;
 import frc.robot.studies.EstimatorRuns.Timed;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.LongFunction;
@@ -462,6 +463,8 @@ final class EstimatorScenarios {
             SHORT,
             atTheStart(
                 stage -> stage.misplace(new Transform2d(0.4, 0.3, Rotation2d.fromDegrees(15))))));
+    all.add(offHeading(30));
+    all.add(offHeading(180));
     all.add(
         scenario(
             "disabled-carried",
@@ -738,6 +741,23 @@ final class EstimatorScenarios {
             0.05,
             List.of()));
     return List.copyOf(held);
+  }
+
+  /**
+   * The robot set down on its start facing this far from the start's heading, which it believes: a
+   * robot set down crooked in the pit or on a practice field, or backwards. It stands where the
+   * start is.
+   */
+  private static Scenario offHeading(double degrees) {
+    return scenario(
+        String.format(Locale.ROOT, "off-heading-%.0f", degrees),
+        String.format(
+            Locale.ROOT,
+            "Set down on its start facing %.0f° from the start's heading, which it believes.",
+            degrees),
+        SHORT,
+        atTheStart(
+            stage -> stage.misplace(new Transform2d(0, 0, Rotation2d.fromDegrees(degrees)))));
   }
 
   private static Scenario gyroScale(String name, String description, double scale) {

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
 import com.michaelgrundvig.frc.localization.EstimatorConfig;
+import com.michaelgrundvig.frc.localization.HeadingCorrection;
 import com.michaelgrundvig.frc.localization.PoseCovariance;
 import com.michaelgrundvig.frc.runtime.ExampleRobot;
 import com.michaelgrundvig.frc.runtime.SimulationTest;
@@ -95,13 +96,11 @@ class ConsistencyStudyTest {
   @Test
   void theHeadingOptionNamesEachWay() {
     assertThat(ConsistencyStudy.heading("measurements"))
-        .isEqualTo(EstimatorConfig.HeadingCorrection.HEADING_MEASUREMENTS);
+        .isEqualTo(HeadingCorrection.HEADING_MEASUREMENTS);
     assertThat(ConsistencyStudy.heading("doubt"))
-        .isEqualTo(EstimatorConfig.HeadingCorrection.HEADING_MEASUREMENTS_AND_MOUNT_DOUBT);
-    assertThat(ConsistencyStudy.heading("every"))
-        .isEqualTo(EstimatorConfig.HeadingCorrection.EVERY_FIX);
-    assertThat(ConsistencyStudy.heading(null))
-        .isEqualTo(ExampleRobot.SIM.estimator().headingCorrection());
+        .isEqualTo(HeadingCorrection.HEADING_MEASUREMENTS_AND_MOUNT_DOUBT);
+    assertThat(ConsistencyStudy.heading("every")).isEqualTo(HeadingCorrection.EVERY_FIX);
+    assertThat(ConsistencyStudy.heading(null)).isEqualTo(HeadingCorrection.EVERY_FIX);
   }
 
   /** Each gate on the claimed uncertainty, at its edges. */

@@ -6,7 +6,7 @@ import static org.wpilib.units.Units.Meters;
 import com.michaelgrundvig.frc.localization.TagDetections;
 import com.michaelgrundvig.frc.runtime.ExampleRobot;
 import com.michaelgrundvig.frc.runtime.RobotSim;
-import com.michaelgrundvig.frc.runtime.subsystems.vision.VisionSim;
+import com.michaelgrundvig.frc.runtime.sim.VisionSim;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import java.util.ArrayList;
@@ -40,9 +40,9 @@ import org.wpilib.math.geometry.Transform3d;
 @ExtendWith(RobotSim.class)
 class CameraImageSimTest {
   private static final FieldModel FIELD = TagLayouts.named("FRC_2026_REBUILT_WELDED");
-  private static final CameraConfig.Sensor SENSOR =
+  private static final CameraConfig.ImageSensor SENSOR =
       ExampleRobot.SIM.definition().cameras().get(0).sensor();
-  private static final Conditions NOMINAL = Conditions.nominal(CameraStudyConfig.DEFAULTS);
+  private static final Conditions NOMINAL = Conditions.nominal(CameraStudyConfig.defaults());
 
   /** The worst difference found, of each kind, for the summary line. */
   private final Map<String, Double> worst = new HashMap<>();
@@ -75,11 +75,13 @@ class CameraImageSimTest {
                 targets.add(new VisionTargetSim(tag.pose(), TargetModel.kAprilTag36h11, id)));
     try (PhotonCamera camera = new PhotonCamera("camera-study-check")) {
       PhotonCameraSim photonVision =
-          new PhotonCameraSim(camera, VisionSim.properties(SENSOR, 0), FIELD.toField());
+          new PhotonCameraSim(
+              camera, VisionSim.properties(CameraImageSim.cameraOf(SENSOR), 0), FIELD.toField());
       // The streams are switched off below, so nobody could view what the servers would serve.
       VisionSim.closeVideoServers(camera.getName());
       try {
-        photonVision.setMaxSightRange(SENSOR.sightRange().in(Meters));
+        photonVision.setMaxSightRange(
+            CameraImageSim.cameraOf(SENSOR).sightRangeOrDefault().in(Meters));
         photonVision.enableRawStream(false);
         photonVision.enableProcessedStream(false);
         compare(study, photonVision, targets);
@@ -114,9 +116,9 @@ class CameraImageSimTest {
         Map<Integer, PhotonTrackedTarget> byId = new HashMap<>();
         theirs.getTargets().forEach(target -> byId.put(target.getFiducialId(), target));
         assertThat(ours.tags())
-            .extracting(TagDetections.Tag::id)
+            .extracting(TagDetections.Sighting::id)
             .containsExactlyInAnyOrderElementsOf(byId.keySet());
-        for (TagDetections.Tag tag : ours.tags()) {
+        for (TagDetections.Sighting tag : ours.tags()) {
           PhotonTrackedTarget target = Objects.requireNonNull(byId.get(tag.id()));
           for (int c = 0; c < 4; c++) {
             differs(
@@ -194,7 +196,7 @@ class CameraImageSimTest {
     TagDetections without = study.detections(seen, "front");
 
     assertThat(without.tags())
-        .extracting(TagDetections.Tag::id)
+        .extracting(TagDetections.Sighting::id)
         .doesNotContain(failed)
         .hasSize(whole.tags().size() - 1);
     TagDetections.MultiTag solvedWith = Objects.requireNonNull(whole.multiTag());
@@ -233,7 +235,7 @@ class CameraImageSimTest {
     TagDetections clear = study.image(cameraPose, "front", 1, List.of());
     TagDetections hidden = study.image(cameraPose, "front", 1, List.of(post));
 
-    assertThat(clear.tags()).extracting(TagDetections.Tag::id).contains(25, 26);
+    assertThat(clear.tags()).extracting(TagDetections.Sighting::id).contains(25, 26);
     assertThat(hidden.tags())
         .containsExactlyElementsOf(clear.tags().stream().filter(tag -> tag.id() != 25).toList());
   }

@@ -1,7 +1,8 @@
 package frc.robot.studies;
 
+import com.michaelgrundvig.frc.localization.DefaultLocalizer;
 import com.michaelgrundvig.frc.localization.EstimatorConfig;
-import com.michaelgrundvig.frc.localization.EstimatorConfigBuilder;
+import com.michaelgrundvig.frc.localization.HeadingCorrection;
 import com.michaelgrundvig.frc.localization.LocalizationEstimate;
 import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.localization.VisionConfigBuilder;
@@ -400,7 +401,7 @@ final class ConsistencyRuns {
    * @param noiseScale the vision pipeline's noise model scaled by this ({@link #robot})
    * @param heading what may correct the heading beside the gyro
    */
-  record Setup(Spread spread, double noiseScale, EstimatorConfig.HeadingCorrection heading) {
+  record Setup(Spread spread, double noiseScale, HeadingCorrection heading) {
     /**
      * Half the 2026 noise model, a little wider than the simulated cameras' noise: the study reads
      * a position NEES of 1.0 to 2.0 on a calibrated robot at half, and 1.3 to 2.5 at a quarter
@@ -417,10 +418,10 @@ final class ConsistencyRuns {
         new Setup(
             Spread.matched(ExampleRobot.SIM.estimator()),
             MATCHED_NOISE_SCALE,
-            ExampleRobot.SIM.estimator().headingCorrection());
+            HeadingCorrection.EVERY_FIX);
 
     /** The same, with another way to correct the heading. */
-    Setup with(EstimatorConfig.HeadingCorrection other) {
+    Setup with(HeadingCorrection other) {
       return new Setup(spread, noiseScale, other);
     }
 
@@ -444,10 +445,9 @@ final class ConsistencyRuns {
                 .linearStdDevBaseline(setup.noiseScale() * vision.linearStdDevBaseline())
                 .angularStdDevBaseline(setup.noiseScale() * vision.angularStdDevBaseline())
                 .build())
-        .estimator(
-            EstimatorConfigBuilder.builder(ExampleRobot.SIM.estimator())
-                .headingCorrection(setup.heading())
-                .build())
+        .localizer(
+            DefaultLocalizer.with(
+                ExampleRobot.SIM.estimator(), ExampleRobot.SIM.slipCheck(), setup.heading()))
         .build();
   }
 

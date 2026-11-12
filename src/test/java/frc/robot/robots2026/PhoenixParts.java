@@ -9,9 +9,12 @@ import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CanBus;
 import com.michaelgrundvig.frc.world.robot.ControllerPlan;
 import com.michaelgrundvig.frc.world.robot.Drive;
-import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
+import com.michaelgrundvig.frc.world.robot.Drivetrain;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismControlBuilder;
+import com.michaelgrundvig.frc.world.robot.MechanismControlCurrentLimitsBuilder;
+import com.michaelgrundvig.frc.world.robot.MechanismControlGainsBuilder;
 import com.michaelgrundvig.frc.world.robot.MechanismRotations;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
@@ -42,7 +45,7 @@ final class PhoenixParts {
 
   /** The drive's motors, IDs from 1, each turning counterclockwise to move the joint forward. */
   static List<MechanismWiring.Device> wiring(Drive drive) {
-    int count = ((Actuator.Motors) drive.actuator()).count();
+    int count = ((Actuator.MotorGroup) drive.actuator()).count();
     List<MechanismWiring.Device> motors = new ArrayList<>();
     for (int id = 1; id <= count; id++) {
       motors.add(motor(id, false));
@@ -65,7 +68,7 @@ final class PhoenixParts {
    */
   static MechanismControl.Gains gains(
       MechanismRotations units, double kP, double kD, double kV, double kG, double theirsPerOurs) {
-    return MechanismControl.Gains.builder()
+    return MechanismControlGainsBuilder.builder()
         .kP(gain(units, kP, theirsPerOurs))
         .kI(0)
         .kD(gain(units, kD, theirsPerOurs))
@@ -89,15 +92,11 @@ final class PhoenixParts {
   }
 
   static Optional<MechanismControl.SoftLimits> soft(double lower, double upper) {
-    return Optional.of(MechanismControl.SoftLimits.builder().lower(lower).upper(upper).build());
+    return Optional.of(MechanismControl.SoftLimits.of(lower, upper));
   }
 
   static Optional<MechanismControl.Profile> profile(double cruise, double acceleration) {
-    return Optional.of(
-        MechanismControl.Profile.builder()
-            .cruiseVelocity(cruise)
-            .acceleration(acceleration)
-            .build());
+    return Optional.of(MechanismControl.Profile.of(cruise, acceleration));
   }
 
   /** The definition's seeds, no feedback, no limits or profile, braking. */
@@ -113,18 +112,18 @@ final class PhoenixParts {
       MechanismControl.Gains gains,
       Optional<MechanismControl.SoftLimits> softLimits,
       Optional<MechanismControl.Profile> profile) {
-    return MechanismControl.builder()
+    return MechanismControlBuilder.builder()
         .loop(MechanismControl.Loop.POSITION)
         .gains(gains)
         .currentLimits(
-            MechanismControl.CurrentLimits.builder()
+            MechanismControlCurrentLimitsBuilder.builder()
                 .stator(Amps.of(40))
                 .supply(Amps.of(40))
                 .supplyLower(Amps.of(40))
                 .supplyLowerTime(Seconds.of(1))
                 .build())
         .neutralMode(MechanismControl.NeutralMode.BRAKE)
-        .deadChannel(MechanismControl.DeadChannel.DEFAULTS)
+        .deadChannel(MechanismControl.DeadChannel.defaults())
         .softLimits(softLimits)
         .profile(profile)
         .build();
@@ -159,8 +158,7 @@ final class PhoenixParts {
   }
 
   /** A swerve corner's mechanisms, its CANcoder on its steering's shaft. */
-  static RobotMath corner(
-      Body body, DrivetrainGeometry.ModuleJoints corner, Sensor.Encoder cancoder) {
+  static RobotMath corner(Body body, Drivetrain.ModuleJoints corner, Sensor.Encoder cancoder) {
     return RobotMath.of(
         body,
         List.of(corner.steer(), corner.wheel()),

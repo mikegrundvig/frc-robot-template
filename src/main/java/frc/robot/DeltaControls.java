@@ -7,7 +7,7 @@ import static org.wpilib.units.Units.Seconds;
 import com.michaelgrundvig.frc.runtime.autos.Autos;
 import com.michaelgrundvig.frc.runtime.behavior.Gate;
 import com.michaelgrundvig.frc.runtime.behavior.RecordingGamepad;
-import com.michaelgrundvig.frc.runtime.subsystems.drive.Drive;
+import com.michaelgrundvig.frc.runtime.subsystems.drive.SwerveDrive;
 import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.JointMechanism;
 import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.Joints;
 import com.michaelgrundvig.frc.world.field.Heading;
@@ -58,7 +58,7 @@ public final class DeltaControls {
       Scheduler scheduler,
       RobotDefinition robot,
       Joints joints,
-      Drive drive,
+      SwerveDrive drive,
       RecordingGamepad driver,
       RecordingGamepad operator,
       Autos autos) {
@@ -111,7 +111,7 @@ public final class DeltaControls {
    * position half a turn (AutoMath.java:84-109), which swaps A and B's sides; here each is 20° to
    * the same side of the driver's own forward, whichever alliance, as on blue.
    */
-  private void bind(Drive drive, RecordingGamepad driver, RecordingGamepad operator) {
+  private void bind(SwerveDrive drive, RecordingGamepad driver, RecordingGamepad operator) {
     operator.rightTrigger().whileTrue(roller.run(DeltaRobot.INTAKING));
     operator.leftTrigger().whileTrue(roller.run(DeltaRobot.OUTTAKING)); // the interlock applies
     driver.rightTrigger().whileTrue(joints.run(DeltaRobot.FEEDING));

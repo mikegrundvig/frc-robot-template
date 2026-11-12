@@ -16,6 +16,7 @@ import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.Motor;
+import com.michaelgrundvig.frc.world.robot.RevoluteJoint;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.BetaRobot;
 import java.io.IOException;
@@ -37,22 +38,24 @@ import org.junit.jupiter.api.extension.ExtendWith;
 class BetaRecordedSimTest {
   /** The pivot's loop closed on its duty-cycle encoder, on the robot, each loop. */
   private static RobotDefinition closed() {
-    return BetaRobot.ROBOT.with(
-        BetaRobot.PIVOT.absoluteEncoder(
-            encoder ->
-                encoder.on(
-                    MechanismWiring.PortEncoder.dutyCycle(1)
-                        .offset(Degrees.of(-296))
-                        .inverted()
-                        .closesLoop())));
+    return BetaRobot.CONFIG
+        .definition()
+        .with(
+            BetaRobot.PIVOT.absoluteEncoder(
+                encoder ->
+                    encoder.on(
+                        MechanismWiring.PortEncoder.dutyCycle(1)
+                            .offset(Degrees.of(-296))
+                            .inverted()
+                            .closesLoop())));
   }
 
   /** The pivot on a NEO on a SPARK MAX, and the shooter on four Vortexes on SPARK Flexes. */
   private static RobotDefinition sparks() {
-    Joint.Revolute pivot =
+    RevoluteJoint pivot =
         unmotored(BetaRobot.PIVOT)
             .motors(Motor.NEO.through(Gearing.of(25)).on(SPARK_MAX.can(32).clockwise()));
-    Joint.Revolute shooter =
+    RevoluteJoint shooter =
         unmotored(BetaRobot.SHOOTER)
             .motors(
                 Motor.NEO_VORTEX
@@ -62,13 +65,13 @@ class BetaRecordedSimTest {
                         SPARK_FLEX.can(42),
                         SPARK_FLEX.can(43).clockwise(),
                         SPARK_FLEX.can(44).clockwise()));
-    return BetaRobot.ROBOT.with(pivot, shooter);
+    return BetaRobot.CONFIG.definition().with(pivot, shooter);
   }
 
   @Test
   void theirSettingsAreAsRecorded() throws IOException {
     List<String> rows = new ArrayList<>();
-    for (RobotDefinition robot : List.of(BetaRobot.ROBOT, closed(), sparks())) {
+    for (RobotDefinition robot : List.of(BetaRobot.CONFIG.definition(), closed(), sparks())) {
       rows.addAll(JointRecordings.settings(robot));
     }
     GoldenFile.check(getClass(), "beta-settings.csv", JointRecordings.SETTINGS, rows);
@@ -76,7 +79,7 @@ class BetaRecordedSimTest {
 
   @Test
   void theirSessionIsAsRecorded() throws IOException {
-    List<String> rows = new ArrayList<>(session(BetaRobot.ROBOT));
+    List<String> rows = new ArrayList<>(session(BetaRobot.CONFIG.definition()));
     rows.addAll(session(closed()));
     GoldenFile.check(getClass(), "beta-session.csv", rows.get(0), rows);
   }

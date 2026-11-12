@@ -76,3 +76,9 @@ each one's Spotter agent names the robot at `10.TE.AM.2`.
    Elastic) before enabling: each one
    names what's wrong and where to look. On a first robot expect the CANivore's, if its package
    isn't installed yet, and the coprocessors' until they're flashed and plugged in.
+   A swerve module whose motor controllers or CANcoder haven't confirmed the program's settings
+   (off the bus, or at a wrong CAN ID) raises its "not configured" alert, and the drivetrain holds
+   still: the program sends the settings again until the device confirms, so fix the ID or wiring
+   and no restart is needed ([tuner-x.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/tuner-x.md)).
+   A CANcoder that reads its magnet as red raises its module's magnet alert: seat the magnet before
+   zeroing that module.

@@ -33,8 +33,8 @@ hands the runtime that class's game (`Rebuilt.GAME`, the season's field and its 
    against the tags, the places where the manual puts them, the zones where the manual draws them.
    When the model has the season, delete yours and use the model's.
 
-4. **Check the limits.** Point `SeasonLimitsTest` at the new season's limits (`LIMITS` in its
-   class), so every robot's definition is checked against the new manual.
+4. **Check the limits.** In `SeasonLimitsTest`, replace `Rebuilt.LIMITS` with the new season's
+   class's `LIMITS`, so every robot's definition is checked against the new manual.
 
 5. **Recheck the rules' numbers.** Every row of [runtime/docs/values.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/values.md) whose source is
    "rules" (the frame, its height, the bumpers, the mass) comes from last season's manual. Check

@@ -18,8 +18,8 @@ class RobustnessTest {
   private static final Candidate BLIND = new Candidate("blind", List.of(BACK));
   private static final List<Conditions> TWO_TRIALS =
       List.of(
-          Conditions.trial(CameraStudyConfig.DEFAULTS, 0),
-          Conditions.trial(CameraStudyConfig.DEFAULTS, 1));
+          Conditions.trial(CameraStudyConfig.defaults(), 0),
+          Conditions.trial(CameraStudyConfig.defaults(), 1));
 
   private static Score scored(Candidate candidate, double p95, double withinFive) {
     return new Score(candidate, p95, withinFive, 0, 1, 1, 1, 1, 1, 0.01, 0.1, null);

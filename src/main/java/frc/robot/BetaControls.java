@@ -8,8 +8,8 @@ import static org.wpilib.units.Units.Seconds;
 import com.michaelgrundvig.frc.runtime.autos.Autos;
 import com.michaelgrundvig.frc.runtime.behavior.Gate;
 import com.michaelgrundvig.frc.runtime.behavior.RecordingGamepad;
-import com.michaelgrundvig.frc.runtime.subsystems.drive.Drive;
 import com.michaelgrundvig.frc.runtime.subsystems.drive.DriveAssist;
+import com.michaelgrundvig.frc.runtime.subsystems.drive.SwerveDrive;
 import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.JointMechanism;
 import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.Joints;
 import com.michaelgrundvig.frc.world.field.Heading;
@@ -97,7 +97,7 @@ public final class BetaControls {
   private final @Nullable DriveAssist aim;
 
   /** The drivetrain their autos drive along their paths; null for behavior alone. */
-  private final @Nullable Drive drive;
+  private final @Nullable SwerveDrive drive;
 
   /**
    * As the robot builds its {@code Controls}: aimed by the drive, bound to both gamepads, and with
@@ -109,7 +109,7 @@ public final class BetaControls {
       Scheduler scheduler,
       RobotDefinition robot,
       Joints joints,
-      Drive drive,
+      SwerveDrive drive,
       RecordingGamepad driver,
       RecordingGamepad operator,
       Autos autos) {
@@ -122,7 +122,7 @@ public final class BetaControls {
     autos.add("Left Double", left, this::leftDouble);
   }
 
-  private BetaControls(Joints joints, Drive drive, DriveAssist aim) {
+  private BetaControls(Joints joints, SwerveDrive drive, DriveAssist aim) {
     this(joints, drive, aim, aim.aimed());
   }
 
@@ -138,7 +138,7 @@ public final class BetaControls {
   }
 
   private BetaControls(
-      Joints joints, @Nullable Drive drive, @Nullable DriveAssist aim, Gate aimed) {
+      Joints joints, @Nullable SwerveDrive drive, @Nullable DriveAssist aim, Gate aimed) {
     this.joints = joints;
     this.drive = drive;
     this.aim = aim;
@@ -200,7 +200,7 @@ public final class BetaControls {
   }
 
   /** The drivetrain, which their autos need: not there in their behavior alone. */
-  private Drive drive() {
+  private SwerveDrive drive() {
     return Objects.requireNonNull(drive, "their autos drive the robot: build with a drive");
   }
 
@@ -210,7 +210,7 @@ public final class BetaControls {
    * aimed shot until autonomous ends, which the robot then cuts off. The path ends on the start.
    */
   private Command leftSingle(Place start) {
-    Drive moves = drive();
+    SwerveDrive moves = drive();
     return Command.noRequirements(
             co -> {
               co.await(
@@ -230,7 +230,7 @@ public final class BetaControls {
    * which the robot then cuts off.
    */
   private Command leftDouble() {
-    Drive moves = drive();
+    SwerveDrive moves = drive();
     return Command.noRequirements(
             co -> {
               co.await(
@@ -264,7 +264,7 @@ public final class BetaControls {
    * (AutoMath.java: 78-102), which swaps A and B's sides; here each is 20° to the same side of the
    * driver's own forward, whichever alliance, as on blue.
    */
-  private void bind(Drive drive, RecordingGamepad driver, RecordingGamepad operator) {
+  private void bind(SwerveDrive drive, RecordingGamepad driver, RecordingGamepad operator) {
     operator.rightTrigger().whileTrue(intake());
     operator
         .leftTrigger()

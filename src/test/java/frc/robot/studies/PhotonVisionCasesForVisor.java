@@ -2,7 +2,7 @@ package frc.robot.studies;
 
 import com.michaelgrundvig.frc.runtime.ExampleRobot;
 import com.michaelgrundvig.frc.runtime.RobotSim;
-import com.michaelgrundvig.frc.runtime.subsystems.vision.VisionSim;
+import com.michaelgrundvig.frc.runtime.sim.VisionSim;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import java.io.IOException;
@@ -31,7 +31,7 @@ import org.wpilib.math.geometry.Transform3d;
 @EnabledIfEnvironmentVariable(named = "VISOR_CASES", matches = ".+")
 class PhotonVisionCasesForVisor {
   private static final FieldModel FIELD = TagLayouts.named("FRC_2026_REBUILT_WELDED");
-  private static final CameraConfig.Sensor SENSOR =
+  private static final CameraConfig.ImageSensor SENSOR =
       ExampleRobot.SIM.definition().cameras().get(0).sensor();
   private static final int CASES = 2000;
 
@@ -45,8 +45,8 @@ class PhotonVisionCasesForVisor {
   @Test
   void write() throws IOException {
     CameraImageSim study =
-        new CameraImageSim(FIELD, SENSOR, Conditions.nominal(CameraStudyConfig.DEFAULTS));
-    var intrinsics = VisionSim.properties(SENSOR, 0).getIntrinsics();
+        new CameraImageSim(FIELD, SENSOR, Conditions.nominal(CameraStudyConfig.defaults()));
+    var intrinsics = VisionSim.properties(CameraImageSim.cameraOf(SENSOR), 0).getIntrinsics();
     StringBuilder json = new StringBuilder();
     json.append(
         String.format(

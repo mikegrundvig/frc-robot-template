@@ -70,9 +70,8 @@ class CameraImageSimTest {
     List<VisionTargetSim> targets = new ArrayList<>();
     FIELD
         .tags()
-        .forEach(
-            (id, tag) ->
-                targets.add(new VisionTargetSim(tag.pose(), TargetModel.kAprilTag36h11, id)));
+        .forEach((id, tag) ->
+            targets.add(new VisionTargetSim(tag.pose(), TargetModel.kAprilTag36h11, id)));
     try (PhotonCamera camera = new PhotonCamera("camera-study-check")) {
       PhotonCameraSim photonVision =
           new PhotonCameraSim(

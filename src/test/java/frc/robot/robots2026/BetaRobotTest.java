@@ -148,15 +148,15 @@ class BetaRobotTest {
 
   /**
    * kSpeedAt12Volts, 5.4 m/s (TunerConstants.java:76), is the team's own: the motors and gearing
-   * reach 5.11 m/s free without FOC, as the template runs them (4.94 with FOC, as their code models
+   * reach 5.17 m/s free without FOC, as the template runs them (4.93 with FOC, as their code models
    * it). It's what Drive.java desaturates the wheels to and gives PathPlanner, so every speed above
-   * 5.11 asks the drive for more than it has. The team's quirk, not the model's.
+   * 5.17 asks the drive for more than it has. The team's quirk, not the model's.
    */
   @Test
   void theTeamsTopSpeedIsAboveWhatTheMotorsReach() {
     double free = MODULES.freeSpeed().in(MetersPerSecond);
 
-    assertThat(free).isCloseTo(5.1108, within(1e-4));
+    assertThat(free).isCloseTo(5.1661, within(1e-4));
     assertThat(5.4).isGreaterThan(free);
     assertThat(3.25).as("the drivers' top speed, Constants.java:46").isLessThan(free);
   }
@@ -210,15 +210,15 @@ class BetaRobotTest {
   /**
    * Every velocity setpoint stays at or under its mechanism's free speed: the shooter's cap, 4500
    * rpm (Constants.java:70); the full send's 1000 (FullSend.java:50) and the transition's 2000
-   * (Transition.java:80), output rpm. The intake's 2000 output rpm (Intake.java:51) is exactly its
-   * motor's free speed through 3:1, so its velocity loop can't reach it under any load.
+   * (Transition.java:80), output rpm. The intake's 2000 output rpm (Intake.java:51) is 99% of its
+   * motor's free speed through 3:1, 2022 rpm, so its velocity loop can't hold it under load.
    */
   @Test
   void noSetpointIsFasterThanItsMotorsCanTurnIt() {
     assertThat(freeRpm(math, BetaRobot.SHOOTER)).isGreaterThan(4500);
     assertThat(freeRpm(math, BetaRobot.FULL_SEND)).isGreaterThan(1000);
     assertThat(freeRpm(math, BetaRobot.TRANSITION)).isGreaterThan(2000);
-    assertThat(freeRpm(math, BetaRobot.INTAKE)).isCloseTo(2000, within(1e-6));
+    assertThat(freeRpm(math, BetaRobot.INTAKE)).isCloseTo(6065.0 / 3, within(1e-6));
   }
 
   /**
@@ -253,22 +253,21 @@ class BetaRobotTest {
             BetaRobot.FULL_SEND, Output.rpm("feeding", 5000), Output.rpm("unjamming", -1000));
 
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                swapped(
-                    ROBOT,
-                    BetaRobot.FULL_SEND,
-                    autoFeed,
-                    motors(BetaRobot.FULL_SEND),
-                    JointFixtures.motors(autoFeed, Motor.KRAKEN_X60, 1, Gearing.of(4))))
+        .isThrownBy(() ->
+            swapped(
+                ROBOT,
+                BetaRobot.FULL_SEND,
+                autoFeed,
+                motors(BetaRobot.FULL_SEND),
+                JointFixtures.motors(autoFeed, Motor.KRAKEN_X60, 1, Gearing.of(4))))
         .withMessage(
-            "RobotDefinition[beta].joints: full send's feeding, 5000 rpm, is 3.333 times its"
-                + " free speed, 1500 rpm: its motors can't turn it that fast; give it a speed under"
+            "RobotDefinition[beta].joints: full send's feeding, 5000 rpm, is 3.298 times its"
+                + " free speed, 1516 rpm: its motors can't turn it that fast; give it a speed under"
                 + " that");
   }
 
   /**
-   * The intake's 2000 rpm is exactly its motor's free speed through 3:1, so its velocity loop has
+   * The intake's 2000 rpm is 99% of its motor's free speed through 3:1, so its velocity loop has
    * nothing left to hold it under load: noted, not refused.
    */
   @Test
@@ -277,7 +276,7 @@ class BetaRobotTest {
         .filteredOn(finding -> finding.level() == Finding.Level.DOUBT)
         .extracting(Finding::message)
         .containsExactly(
-            "intake's intaking, 2000 rpm, is 100% of its free speed, 2000 rpm: a velocity loop has"
+            "intake's intaking, 2000 rpm, is 99% of its free speed, 2022 rpm: a velocity loop has"
                 + " little or nothing left to hold it under load");
   }
 
@@ -321,8 +320,8 @@ class BetaRobotTest {
       assertThat(pair[0] / pair[1]).isBetween(SANITY_LOW, SANITY_HIGH);
     }
     assertThat(pairs[0][0])
-        .as("a Kraken X60's 12 V over its 100 rps")
-        .isCloseTo(0.12, within(1e-9));
+        .as("a Kraken X60's 12 V over its 101.1 rps")
+        .isCloseTo(12 / (6065.0 / 60), within(1e-9));
   }
 
   /** Each camera's mount as Constants.java:119-157 gives it, in WPILib's own transform. */

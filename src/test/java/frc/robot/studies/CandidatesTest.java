@@ -48,11 +48,8 @@ class CandidatesTest {
   void theFamilyFacesOutFromTheFrame() {
     Candidate corners =
         Candidates.of(ExampleRobot.SIM).stream()
-            .filter(
-                candidate ->
-                    candidate
-                        .name()
-                        .equals("4 cameras: corners, splayed 30°, 16 in up, tilted 10°"))
+            .filter(candidate ->
+                candidate.name().equals("4 cameras: corners, splayed 30°, 16 in up, tilted 10°"))
             .findFirst()
             .orElseThrow();
 

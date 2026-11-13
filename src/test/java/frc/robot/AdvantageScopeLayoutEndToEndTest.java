@@ -60,19 +60,17 @@ class AdvantageScopeLayoutEndToEndTest {
             "/HeldBy", "Holder[]",
             "/Controls/Fired", "BindingFired[]");
     List<String> missing = new ArrayList<>();
-    structByKeysEnd.forEach(
-        (keysEnd, struct) -> {
-          boolean isLogged =
-              logged.entrySet().stream()
-                  .anyMatch(
-                      each ->
-                          each.getKey().startsWith("/RealOutputs/")
-                              && each.getKey().endsWith(keysEnd)
-                              && each.getValue().equals(struct));
-          if (!isLogged) {
-            missing.add(keysEnd + " as " + struct);
-          }
-        });
+    structByKeysEnd.forEach((keysEnd, struct) -> {
+      boolean isLogged =
+          logged.entrySet().stream()
+              .anyMatch(each ->
+                  each.getKey().startsWith("/RealOutputs/")
+                      && each.getKey().endsWith(keysEnd)
+                      && each.getValue().equals(struct));
+      if (!isLogged) {
+        missing.add(keysEnd + " as " + struct);
+      }
+    });
     if (!logged.containsKey("/RealOutputs/Robot/Names/Interlocks")) {
       missing.add("/Robot/Names/Interlocks");
     }

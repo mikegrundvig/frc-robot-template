@@ -118,11 +118,10 @@ class EstimatorStressSimTest {
     assertThat(firstDoubted.get(knocked))
         .as("%s doubted, seconds after the robot was enabled", knocked)
         .isBetween(KNOCKED_AT_SECONDS, KNOCKED_AT_SECONDS + KNOCK_FLAGGED_WITHIN_SECONDS);
-    firstDoubted.forEach(
-        (camera, seconds) -> {
-          if (!camera.equals(knocked)) {
-            assertThat(seconds).as("%s, never knocked", camera).isInfinite();
-          }
-        });
+    firstDoubted.forEach((camera, seconds) -> {
+      if (!camera.equals(knocked)) {
+        assertThat(seconds).as("%s, never knocked", camera).isInfinite();
+      }
+    });
   }
 }

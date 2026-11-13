@@ -219,12 +219,11 @@ class ConsistencyTest {
 
     assertThatThrownBy(() -> consistency.add(List.of()))
         .isInstanceOf(IllegalArgumentException.class);
-    assertThatThrownBy(
-            () ->
-                consistency.add(
-                    List.of(
-                        new Consistency.Sample(0, 0, 0, claimed),
-                        new Consistency.Sample(0, 0, 0, claimed))))
+    assertThatThrownBy(() ->
+            consistency.add(
+                List.of(
+                    new Consistency.Sample(0, 0, 0, claimed),
+                    new Consistency.Sample(0, 0, 0, claimed))))
         .hasMessageContaining("same loops");
     assertThatThrownBy(() -> new Consistency().summary()).isInstanceOf(IllegalStateException.class);
   }

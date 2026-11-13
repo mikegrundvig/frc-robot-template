@@ -79,13 +79,12 @@ record CameraConditions(
     return ALL.stream()
         .filter(each -> each.name.equals(name))
         .findFirst()
-        .orElseThrow(
-            () ->
-                new IllegalArgumentException(
-                    "--cameras must be "
-                        + String.join(" or ", ALL.stream().map(CameraConditions::name).toList())
-                        + ": "
-                        + name));
+        .orElseThrow(() ->
+            new IllegalArgumentException(
+                "--cameras must be "
+                    + String.join(" or ", ALL.stream().map(CameraConditions::name).toList())
+                    + ": "
+                    + name));
   }
 
   /** The robot whose cameras see no farther than these conditions say. */

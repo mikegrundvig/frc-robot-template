@@ -358,14 +358,13 @@ final class EstimatorRuns {
         }
         // What happens between loops happens before this one, once the robot has been placed.
         if (loop > 0) {
-          pending.removeIf(
-              timed -> {
-                if (timed.seconds() <= seconds + 1e-9) {
-                  timed.action().accept(stage);
-                  return true;
-                }
-                return false;
-              });
+          pending.removeIf(timed -> {
+            if (timed.seconds() <= seconds + 1e-9) {
+              timed.action().accept(stage);
+              return true;
+            }
+            return false;
+          });
         }
         steer(robot, scenario.route(), seconds, stage.enabled, marks, loop);
         cameras.nextLoop(RobotLoop.PERIOD_SECONDS);

@@ -41,13 +41,12 @@ class BetaRecordedSimTest {
     return BetaRobot.CONFIG
         .definition()
         .with(
-            BetaRobot.PIVOT.absoluteEncoder(
-                encoder ->
-                    encoder.on(
-                        MechanismWiring.PortEncoder.dutyCycle(1)
-                            .offset(Degrees.of(-296))
-                            .inverted()
-                            .closesLoop())));
+            BetaRobot.PIVOT.absoluteEncoder(encoder ->
+                encoder.on(
+                    MechanismWiring.PortEncoder.dutyCycle(1)
+                        .offset(Degrees.of(-296))
+                        .inverted()
+                        .closesLoop())));
   }
 
   /** The pivot on a NEO on a SPARK MAX, and the shooter on four Vortexes on SPARK Flexes. */

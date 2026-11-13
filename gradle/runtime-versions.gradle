@@ -30,7 +30,11 @@ def libraryJars = configurations.runtimeClasspath.incoming.artifactView {
 }.files
 // Every module this program runs with, as "group:module" to its version.
 def ourModules = configurations.runtimeClasspath.incoming.artifacts.resolvedArtifacts.map { artifacts ->
-    artifacts.collect { it.id.componentIdentifier }.findAll { it instanceof ModuleComponentIdentifier }.collectEntries {
+    artifacts.collect {
+        it.id.componentIdentifier
+    }.findAll {
+        it instanceof ModuleComponentIdentifier
+    }.collectEntries {
         [("${it.group}:${it.module}".toString()): it.version]
     }
 }

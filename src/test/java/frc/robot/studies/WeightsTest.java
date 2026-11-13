@@ -41,10 +41,8 @@ class WeightsTest {
 
   @Test
   void aHeaderWithoutAHashSaysToMakeItAComment() throws IOException {
-    assertThatThrownBy(
-            () ->
-                Weights.read(
-                    file("name, x min, y min, x max, y max, weight", "Hub, 4, 3, 5, 4, 0")))
+    assertThatThrownBy(() ->
+            Weights.read(file("name, x min, y min, x max, y max, weight", "Hub, 4, 3, 5, 4, 0")))
         .hasMessage(
             "weights.csv line 1: looks like the columns' names: start it with # to make it a comment");
   }

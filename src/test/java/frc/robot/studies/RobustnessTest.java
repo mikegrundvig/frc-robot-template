@@ -103,12 +103,11 @@ class RobustnessTest {
   void everyLayoutMustBeScoredInEveryTrial() {
     List<Score> nominal = List.of(scored(SHARP, 0.020, 1), scored(SINGLE, 0.021, 1));
 
-    assertThatThrownBy(
-            () ->
-                new Robustness(
-                    nominal,
-                    TWO_TRIALS,
-                    List.of(List.of(scored(SHARP, 0.02, 1)), List.of(scored(SHARP, 0.02, 1)))))
+    assertThatThrownBy(() ->
+            new Robustness(
+                nominal,
+                TWO_TRIALS,
+                List.of(List.of(scored(SHARP, 0.02, 1)), List.of(scored(SHARP, 0.02, 1)))))
         .hasMessageContaining("not scored in every trial");
     assertThatThrownBy(() -> new Robustness(nominal, List.of(), List.of()))
         .hasMessageContaining("a trial at least");

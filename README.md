@@ -10,7 +10,7 @@ WPILib's Commands v3. The layout is the standard WPILib project layout, so WPILi
 WPILib and AdvantageKit guide apply unchanged. Use it by clicking **Use this template**, then fill in
 your robot.
 
-> **Status:** early. It tracks WPILib's 2027 prereleases (currently 2027.0.0-alpha-7). The swerve
+> **Status:** early. It tracks WPILib's 2027 prereleases (currently 2027.0.0-alpha-8). The swerve
 > drivetrain drives in the simulator, and has code for CTRE hardware (TalonFX, CANcoder, Pigeon 2)
 > tested against CTRE's simulated devices, not yet on a robot. Parts that only stand in until a
 > library ships for 2027 are listed in [runtime/docs/stand-ins.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/stand-ins.md).

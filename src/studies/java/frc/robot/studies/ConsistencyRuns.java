@@ -166,19 +166,18 @@ final class ConsistencyRuns {
               Scenario.builder()
                   .name("camera-turned-4")
                   .description("The robot's first camera turned 4° on its mount.")
-                  .sensorFaults(
-                      world ->
-                          List.of(
-                              Setting.of(
-                                  FaultCatalog.camera(world.cameraNames().get(0)),
-                                  FaultCatalog.TURNED,
-                                  Map.of(
-                                      FaultCatalog.ROLL,
-                                      0.0,
-                                      FaultCatalog.PITCH,
-                                      0.0,
-                                      FaultCatalog.YAW,
-                                      4.0))))
+                  .sensorFaults(world ->
+                      List.of(
+                          Setting.of(
+                              FaultCatalog.camera(world.cameraNames().get(0)),
+                              FaultCatalog.TURNED,
+                              Map.of(
+                                  FaultCatalog.ROLL,
+                                  0.0,
+                                  FaultCatalog.PITCH,
+                                  0.0,
+                                  FaultCatalog.YAW,
+                                  4.0))))
                   .events(Scenario.NOTHING)
                   .build(),
               robot -> {

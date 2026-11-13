@@ -6,24 +6,24 @@ pivot,leader,CurrentLimits,SupplyCurrentLimit,60.0,A
 pivot,leader,Feedback,SensorToMechanismRatio,25.0,scalar
 pivot,leader,Slot0,kP,188.49555921538757
 pivot,leader,Slot0,kD,6.283185307179586
-pivot,leader,Slot0,kV,3.0
-pivot,leader,Slot0,kA,0.003456195020874526
+pivot,leader,Slot0,kV,2.967848309975268
+pivot,leader,Slot0,kA,0.0034238399745704045
 pivot,leader,Slot0,GravityType,Arm_Cosine
 pivot,leader,Slot1,kP,188.49555921538757
 pivot,leader,Slot1,kD,6.283185307179586
-pivot,leader,Slot1,kV,3.0
-pivot,leader,Slot1,kA,0.003456195020874526
+pivot,leader,Slot1,kV,2.967848309975268
+pivot,leader,Slot1,kA,0.0034238399745704045
 pivot,leader,Slot1,GravityType,Arm_Cosine
 intake,leader,MotorOutput,NeutralMode,Brake
 intake,leader,CurrentLimits,StatorCurrentLimit,40.0,A
 intake,leader,Feedback,SensorToMechanismRatio,2.0,scalar
 intake,leader,Slot0,kP,0.12566370614359174
-intake,leader,Slot0,kV,0.24
-intake,leader,Slot0,kA,2.7649560166996204E-4
+intake,leader,Slot0,kV,0.23742786479802144
+intake,leader,Slot0,kA,2.739071979656323E-4
 intake,leader,Slot0,GravityType,Arm_Cosine
 intake,leader,Slot1,kP,0.12566370614359174
-intake,leader,Slot1,kV,0.24
-intake,leader,Slot1,kA,2.7649560166996204E-4
+intake,leader,Slot1,kV,0.23742786479802144
+intake,leader,Slot1,kA,2.739071979656323E-4
 intake,leader,Slot1,GravityType,Arm_Cosine
 intake,follower 33,request,LeaderID,31
 intake,follower 33,request,MotorAlignment,Opposed
@@ -35,12 +35,12 @@ shooter,leader,MotorOutput,Inverted,Clockwise_Positive
 shooter,leader,MotorOutput,NeutralMode,Brake
 shooter,leader,CurrentLimits,StatorCurrentLimit,40.0,A
 shooter,leader,Slot0,kP,0.12566370614359174
-shooter,leader,Slot0,kV,0.12
-shooter,leader,Slot0,kA,1.3824780083498102E-4
+shooter,leader,Slot0,kV,0.11871393239901072
+shooter,leader,Slot0,kA,1.3695359898281616E-4
 shooter,leader,Slot0,GravityType,Arm_Cosine
 shooter,leader,Slot1,kP,0.12566370614359174
-shooter,leader,Slot1,kV,0.12
-shooter,leader,Slot1,kA,1.3824780083498102E-4
+shooter,leader,Slot1,kV,0.11871393239901072
+shooter,leader,Slot1,kA,1.3695359898281616E-4
 shooter,leader,Slot1,GravityType,Arm_Cosine
 shooter,follower 44,request,LeaderID,43
 shooter,follower 44,request,MotorAlignment,Aligned
@@ -60,24 +60,24 @@ full send,leader,MotorOutput,NeutralMode,Brake
 full send,leader,CurrentLimits,StatorCurrentLimit,50.0,A
 full send,leader,Feedback,SensorToMechanismRatio,4.0,scalar
 full send,leader,Slot0,kP,0.12566370614359174
-full send,leader,Slot0,kV,0.48
-full send,leader,Slot0,kA,5.529912033399241E-4
+full send,leader,Slot0,kV,0.4748557295960429
+full send,leader,Slot0,kA,5.478143959312646E-4
 full send,leader,Slot0,GravityType,Arm_Cosine
 full send,leader,Slot1,kP,0.12566370614359174
-full send,leader,Slot1,kV,0.48
-full send,leader,Slot1,kA,5.529912033399241E-4
+full send,leader,Slot1,kV,0.4748557295960429
+full send,leader,Slot1,kA,5.478143959312646E-4
 full send,leader,Slot1,GravityType,Arm_Cosine
 transition,leader,MotorOutput,Inverted,Clockwise_Positive
 transition,leader,MotorOutput,NeutralMode,Brake
 transition,leader,CurrentLimits,StatorCurrentLimit,60.0,A
 transition,leader,Feedback,SensorToMechanismRatio,2.0,scalar
 transition,leader,Slot0,kP,0.12566370614359174
-transition,leader,Slot0,kV,0.24
-transition,leader,Slot0,kA,2.7649560166996204E-4
+transition,leader,Slot0,kV,0.23742786479802144
+transition,leader,Slot0,kA,2.739071979656323E-4
 transition,leader,Slot0,GravityType,Arm_Cosine
 transition,leader,Slot1,kP,0.12566370614359174
-transition,leader,Slot1,kV,0.24
-transition,leader,Slot1,kA,2.7649560166996204E-4
+transition,leader,Slot1,kV,0.23742786479802144
+transition,leader,Slot1,kA,2.739071979656323E-4
 transition,leader,Slot1,GravityType,Arm_Cosine
 joint,device,group,setting,value
 pivot,leader,MotorOutput,Inverted,Clockwise_Positive
@@ -87,24 +87,24 @@ pivot,leader,CurrentLimits,SupplyCurrentLimit,60.0,A
 pivot,leader,Feedback,SensorToMechanismRatio,25.0,scalar
 pivot,leader,Slot0,kP,188.49555921538757
 pivot,leader,Slot0,kD,6.283185307179586
-pivot,leader,Slot0,kV,3.0
-pivot,leader,Slot0,kA,0.003456195020874526
+pivot,leader,Slot0,kV,2.967848309975268
+pivot,leader,Slot0,kA,0.0034238399745704045
 pivot,leader,Slot0,GravityType,Arm_Cosine
 pivot,leader,Slot1,kP,188.49555921538757
 pivot,leader,Slot1,kD,6.283185307179586
-pivot,leader,Slot1,kV,3.0
-pivot,leader,Slot1,kA,0.003456195020874526
+pivot,leader,Slot1,kV,2.967848309975268
+pivot,leader,Slot1,kA,0.0034238399745704045
 pivot,leader,Slot1,GravityType,Arm_Cosine
 intake,leader,MotorOutput,NeutralMode,Brake
 intake,leader,CurrentLimits,StatorCurrentLimit,40.0,A
 intake,leader,Feedback,SensorToMechanismRatio,2.0,scalar
 intake,leader,Slot0,kP,0.12566370614359174
-intake,leader,Slot0,kV,0.24
-intake,leader,Slot0,kA,2.7649560166996204E-4
+intake,leader,Slot0,kV,0.23742786479802144
+intake,leader,Slot0,kA,2.739071979656323E-4
 intake,leader,Slot0,GravityType,Arm_Cosine
 intake,leader,Slot1,kP,0.12566370614359174
-intake,leader,Slot1,kV,0.24
-intake,leader,Slot1,kA,2.7649560166996204E-4
+intake,leader,Slot1,kV,0.23742786479802144
+intake,leader,Slot1,kA,2.739071979656323E-4
 intake,leader,Slot1,GravityType,Arm_Cosine
 intake,follower 33,request,LeaderID,31
 intake,follower 33,request,MotorAlignment,Opposed
@@ -116,12 +116,12 @@ shooter,leader,MotorOutput,Inverted,Clockwise_Positive
 shooter,leader,MotorOutput,NeutralMode,Brake
 shooter,leader,CurrentLimits,StatorCurrentLimit,40.0,A
 shooter,leader,Slot0,kP,0.12566370614359174
-shooter,leader,Slot0,kV,0.12
-shooter,leader,Slot0,kA,1.3824780083498102E-4
+shooter,leader,Slot0,kV,0.11871393239901072
+shooter,leader,Slot0,kA,1.3695359898281616E-4
 shooter,leader,Slot0,GravityType,Arm_Cosine
 shooter,leader,Slot1,kP,0.12566370614359174
-shooter,leader,Slot1,kV,0.12
-shooter,leader,Slot1,kA,1.3824780083498102E-4
+shooter,leader,Slot1,kV,0.11871393239901072
+shooter,leader,Slot1,kA,1.3695359898281616E-4
 shooter,leader,Slot1,GravityType,Arm_Cosine
 shooter,follower 44,request,LeaderID,43
 shooter,follower 44,request,MotorAlignment,Aligned
@@ -141,24 +141,24 @@ full send,leader,MotorOutput,NeutralMode,Brake
 full send,leader,CurrentLimits,StatorCurrentLimit,50.0,A
 full send,leader,Feedback,SensorToMechanismRatio,4.0,scalar
 full send,leader,Slot0,kP,0.12566370614359174
-full send,leader,Slot0,kV,0.48
-full send,leader,Slot0,kA,5.529912033399241E-4
+full send,leader,Slot0,kV,0.4748557295960429
+full send,leader,Slot0,kA,5.478143959312646E-4
 full send,leader,Slot0,GravityType,Arm_Cosine
 full send,leader,Slot1,kP,0.12566370614359174
-full send,leader,Slot1,kV,0.48
-full send,leader,Slot1,kA,5.529912033399241E-4
+full send,leader,Slot1,kV,0.4748557295960429
+full send,leader,Slot1,kA,5.478143959312646E-4
 full send,leader,Slot1,GravityType,Arm_Cosine
 transition,leader,MotorOutput,Inverted,Clockwise_Positive
 transition,leader,MotorOutput,NeutralMode,Brake
 transition,leader,CurrentLimits,StatorCurrentLimit,60.0,A
 transition,leader,Feedback,SensorToMechanismRatio,2.0,scalar
 transition,leader,Slot0,kP,0.12566370614359174
-transition,leader,Slot0,kV,0.24
-transition,leader,Slot0,kA,2.7649560166996204E-4
+transition,leader,Slot0,kV,0.23742786479802144
+transition,leader,Slot0,kA,2.739071979656323E-4
 transition,leader,Slot0,GravityType,Arm_Cosine
 transition,leader,Slot1,kP,0.12566370614359174
-transition,leader,Slot1,kV,0.24
-transition,leader,Slot1,kA,2.7649560166996204E-4
+transition,leader,Slot1,kV,0.23742786479802144
+transition,leader,Slot1,kA,2.739071979656323E-4
 transition,leader,Slot1,GravityType,Arm_Cosine
 joint,device,group,setting,value
 pivot,leader,parameter,6,1
@@ -186,12 +186,12 @@ intake,leader,MotorOutput,NeutralMode,Brake
 intake,leader,CurrentLimits,StatorCurrentLimit,40.0,A
 intake,leader,Feedback,SensorToMechanismRatio,2.0,scalar
 intake,leader,Slot0,kP,0.12566370614359174
-intake,leader,Slot0,kV,0.24
-intake,leader,Slot0,kA,2.7649560166996204E-4
+intake,leader,Slot0,kV,0.23742786479802144
+intake,leader,Slot0,kA,2.739071979656323E-4
 intake,leader,Slot0,GravityType,Arm_Cosine
 intake,leader,Slot1,kP,0.12566370614359174
-intake,leader,Slot1,kV,0.24
-intake,leader,Slot1,kA,2.7649560166996204E-4
+intake,leader,Slot1,kV,0.23742786479802144
+intake,leader,Slot1,kA,2.739071979656323E-4
 intake,leader,Slot1,GravityType,Arm_Cosine
 intake,follower 33,request,LeaderID,31
 intake,follower 33,request,MotorAlignment,Opposed
@@ -249,22 +249,22 @@ full send,leader,MotorOutput,NeutralMode,Brake
 full send,leader,CurrentLimits,StatorCurrentLimit,50.0,A
 full send,leader,Feedback,SensorToMechanismRatio,4.0,scalar
 full send,leader,Slot0,kP,0.12566370614359174
-full send,leader,Slot0,kV,0.48
-full send,leader,Slot0,kA,5.529912033399241E-4
+full send,leader,Slot0,kV,0.4748557295960429
+full send,leader,Slot0,kA,5.478143959312646E-4
 full send,leader,Slot0,GravityType,Arm_Cosine
 full send,leader,Slot1,kP,0.12566370614359174
-full send,leader,Slot1,kV,0.48
-full send,leader,Slot1,kA,5.529912033399241E-4
+full send,leader,Slot1,kV,0.4748557295960429
+full send,leader,Slot1,kA,5.478143959312646E-4
 full send,leader,Slot1,GravityType,Arm_Cosine
 transition,leader,MotorOutput,Inverted,Clockwise_Positive
 transition,leader,MotorOutput,NeutralMode,Brake
 transition,leader,CurrentLimits,StatorCurrentLimit,60.0,A
 transition,leader,Feedback,SensorToMechanismRatio,2.0,scalar
 transition,leader,Slot0,kP,0.12566370614359174
-transition,leader,Slot0,kV,0.24
-transition,leader,Slot0,kA,2.7649560166996204E-4
+transition,leader,Slot0,kV,0.23742786479802144
+transition,leader,Slot0,kA,2.739071979656323E-4
 transition,leader,Slot0,GravityType,Arm_Cosine
 transition,leader,Slot1,kP,0.12566370614359174
-transition,leader,Slot1,kV,0.24
-transition,leader,Slot1,kA,2.7649560166996204E-4
+transition,leader,Slot1,kV,0.23742786479802144
+transition,leader,Slot1,kA,2.739071979656323E-4
 transition,leader,Slot1,GravityType,Arm_Cosine

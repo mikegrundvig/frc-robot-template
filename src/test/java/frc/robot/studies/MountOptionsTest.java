@@ -74,9 +74,8 @@ class MountOptionsTest {
   void aLayoutsCamerasAreItsPlacesFacingTheirWays() throws IOException {
     Candidate layout =
         three().candidates(ExampleRobot.SIM, SENSOR, 2).stream()
-            .filter(
-                candidate ->
-                    candidate.name().equals("2 cameras: front-left 30°, up 10°; top 0°, up 15°"))
+            .filter(candidate ->
+                candidate.name().equals("2 cameras: front-left 30°, up 10°; top 0°, up 15°"))
             .findFirst()
             .orElseThrow();
 
@@ -110,15 +109,12 @@ class MountOptionsTest {
     assertThatThrownBy(() -> MountOptions.read(file("front-left, 12, 12, 20, 0 30 45, 10")))
         .hasMessageContaining("mounts.csv line 1: the first line names the columns")
         .hasMessageContaining("name, forward (in)");
-    assertThatThrownBy(
-            () ->
-                MountOptions.read(
-                    file("name, forward (ft), left (in), up (in), yaws (deg), tilts (deg)")))
+    assertThatThrownBy(() ->
+            MountOptions.read(
+                file("name, forward (ft), left (in), up (in), yaws (deg), tilts (deg)")))
         .hasMessageContaining("line 1: column forward: \"forward (ft)\" should be forward (in),");
-    assertThatThrownBy(
-            () ->
-                MountOptions.read(
-                    file("name, forward, left (in), up (in), yaws (deg), tilts (deg)")))
+    assertThatThrownBy(() ->
+            MountOptions.read(file("name, forward, left (in), up (in), yaws (deg), tilts (deg)")))
         .hasMessageContaining("column forward");
   }
 

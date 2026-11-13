@@ -185,7 +185,9 @@ tasks.named("test") {
     def goldenUpdate = providers.environmentVariable("GOLDEN_UPDATE").orElse("")
     inputs.property("goldenUpdate", goldenUpdate)
     outputs.upToDateWhen { goldenUpdate.get() != "1" }
-    outputs.doNotCacheIf("GOLDEN_UPDATE rewrites src/test/resources") { goldenUpdate.get() == "1" }
+    outputs.doNotCacheIf("GOLDEN_UPDATE rewrites src/test/resources") {
+        goldenUpdate.get() == "1"
+    }
     doFirst { work.get().asFile.mkdirs() }
 }
 

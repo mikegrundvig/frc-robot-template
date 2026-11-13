@@ -158,11 +158,10 @@ public final class BetaControls {
   /** Deploy and roll. The definition's interlock holds the roller until the pivot passes 110°. */
   public Command intake() {
     return Command.requiring(pivot, roller)
-        .executing(
-            co -> {
-              co.fork(pivot.goTo(BetaRobot.PIVOT_OUT));
-              co.await(roller.run(BetaRobot.INTAKING));
-            })
+        .executing(co -> {
+          co.fork(pivot.goTo(BetaRobot.PIVOT_OUT));
+          co.await(roller.run(BetaRobot.INTAKING));
+        })
         .named("Intake");
   }
 
@@ -170,14 +169,13 @@ public final class BetaControls {
   public Command shoot() {
     return Command.requiring(
             shooter, joints.of(BetaRobot.FULL_SEND), joints.of(BetaRobot.TRANSITION))
-        .executing(
-            co -> {
-              co.fork(shooter.follow(() -> RPM.of(SHOT_RPM)));
-              while (true) {
-                co.waitUntil(readyToShoot);
-                co.await(joints.run(BetaRobot.FEEDING).onlyWhile(readyToShoot));
-              }
-            })
+        .executing(co -> {
+          co.fork(shooter.follow(() -> RPM.of(SHOT_RPM)));
+          while (true) {
+            co.waitUntil(readyToShoot);
+            co.await(joints.run(BetaRobot.FEEDING).onlyWhile(readyToShoot));
+          }
+        })
         .named("Shoot");
   }
 

@@ -254,28 +254,26 @@ final class EstimatorScenarios {
             "worn-tread",
             "Every wheel's tread worn 3%: the robot travels 3% less than its wheels count.",
             SHORT,
-            atTheStart(
-                stage -> {
-                  for (int module = 0; module < FaultCatalog.MODULES.size(); module++) {
-                    stage.fault(
-                        Setting.of(
-                            FaultCatalog.module(module),
-                            FaultCatalog.WORN,
-                            Map.of(FaultCatalog.SCALE, 0.97)));
-                  }
-                })));
+            atTheStart(stage -> {
+              for (int module = 0; module < FaultCatalog.MODULES.size(); module++) {
+                stage.fault(
+                    Setting.of(
+                        FaultCatalog.module(module),
+                        FaultCatalog.WORN,
+                        Map.of(FaultCatalog.SCALE, 0.97)));
+              }
+            })));
     all.add(
         scenario(
             "module-zero-off",
             "The front left module's absolute encoder zeroed 5° off.",
             SHORT,
-            atTheStart(
-                stage ->
-                    stage.fault(
-                        Setting.of(
-                            FaultCatalog.module(0),
-                            FaultCatalog.ZEROED_OFF,
-                            Map.of(FaultCatalog.OFFSET, 5.0))))));
+            atTheStart(stage ->
+                stage.fault(
+                    Setting.of(
+                        FaultCatalog.module(0),
+                        FaultCatalog.ZEROED_OFF,
+                        Map.of(FaultCatalog.OFFSET, 5.0))))));
     all.add(
         scenario(
             "encoder-stale",
@@ -332,26 +330,22 @@ final class EstimatorScenarios {
             "camera-clock-off",
             "The first camera's clock 20 ms off the robot's: its images are stamped a loop late.",
             SHORT,
-            atTheStart(
-                stage ->
-                    stage.fault(
-                        Setting.of(
-                            camera(stage, 0),
-                            FaultCatalog.CLOCK_OFFSET,
-                            Map.of(FaultCatalog.OFFSET, 20.0))))));
+            atTheStart(stage ->
+                stage.fault(
+                    Setting.of(
+                        camera(stage, 0),
+                        FaultCatalog.CLOCK_OFFSET,
+                        Map.of(FaultCatalog.OFFSET, 20.0))))));
     all.add(
         scenario(
             "camera-late",
             "The first camera's images arrive 150 ms later than its configuration says, rightly"
                 + " stamped.",
             SHORT,
-            atTheStart(
-                stage ->
-                    stage.fault(
-                        Setting.of(
-                            camera(stage, 0),
-                            FaultCatalog.LATE,
-                            Map.of(FaultCatalog.EXTRA, 150.0))))));
+            atTheStart(stage ->
+                stage.fault(
+                    Setting.of(
+                        camera(stage, 0), FaultCatalog.LATE, Map.of(FaultCatalog.EXTRA, 150.0))))));
     all.add(
         scenario(
             "camera-frozen",
@@ -366,21 +360,20 @@ final class EstimatorScenarios {
             "tag-moved",
             "Tag 26, on the hub's face toward the start, sits 4 in off the field's layout.",
             SHORT,
-            atTheStart(
-                stage ->
-                    stage.fault(
-                        Setting.of(
-                            FIELD,
-                            FaultCatalog.TAG_MOVED,
-                            Map.of(
-                                FaultCatalog.TAG,
-                                26.0,
-                                FaultCatalog.X,
-                                4.0,
-                                FaultCatalog.Y,
-                                0.0,
-                                FaultCatalog.UP,
-                                0.0))))));
+            atTheStart(stage ->
+                stage.fault(
+                    Setting.of(
+                        FIELD,
+                        FaultCatalog.TAG_MOVED,
+                        Map.of(
+                            FaultCatalog.TAG,
+                            26.0,
+                            FaultCatalog.X,
+                            4.0,
+                            FaultCatalog.Y,
+                            0.0,
+                            FaultCatalog.UP,
+                            0.0))))));
 
     // 7: the gyro.
     all.add(
@@ -388,19 +381,17 @@ final class EstimatorScenarios {
             "gyro-scale",
             "The gyro reads 3% more turn than the robot makes; the backup IMU doesn't.",
             SHORT,
-            atTheStart(
-                stage ->
-                    stage.fault(
-                        Setting.of(GYRO, FaultCatalog.ERRORS, Map.of(FaultCatalog.SCALE, 1.03))))));
+            atTheStart(stage ->
+                stage.fault(
+                    Setting.of(GYRO, FaultCatalog.ERRORS, Map.of(FaultCatalog.SCALE, 1.03))))));
     all.add(
         scenario(
             "gyro-drift",
             "The gyro drifts 10° a minute.",
             SHORT,
-            atTheStart(
-                stage ->
-                    stage.fault(
-                        Setting.of(GYRO, FaultCatalog.ERRORS, Map.of(FaultCatalog.DRIFT, 10.0))))));
+            atTheStart(stage ->
+                stage.fault(
+                    Setting.of(GYRO, FaultCatalog.ERRORS, Map.of(FaultCatalog.DRIFT, 10.0))))));
     all.add(
         scenario(
             "gyro-frozen",
@@ -695,11 +686,10 @@ final class EstimatorScenarios {
             "A robot with two cameras, the front left and the back right: the other two are"
                 + " unplugged from the start.",
             SHORT,
-            atTheStart(
-                stage ->
-                    stage.fault(
-                        Setting.of(camera(stage, 1), FaultCatalog.UNPLUGGED),
-                        Setting.of(camera(stage, 2), FaultCatalog.UNPLUGGED)))));
+            atTheStart(stage ->
+                stage.fault(
+                    Setting.of(camera(stage, 1), FaultCatalog.UNPLUGGED),
+                    Setting.of(camera(stage, 2), FaultCatalog.UNPLUGGED)))));
     held.add(
         scenario(
             "held-far-from-tags",
@@ -843,16 +833,15 @@ final class EstimatorScenarios {
 
   private static Timed[] badMatch() {
     return new Timed[] {
-      atTheStart(
-          stage -> {
-            for (int module = 0; module < FaultCatalog.MODULES.size(); module++) {
-              stage.fault(
-                  Setting.of(
-                      FaultCatalog.module(module),
-                      FaultCatalog.WORN,
-                      Map.of(FaultCatalog.SCALE, 0.97)));
-            }
-          }),
+      atTheStart(stage -> {
+        for (int module = 0; module < FaultCatalog.MODULES.size(); module++) {
+          stage.fault(
+              Setting.of(
+                  FaultCatalog.module(module),
+                  FaultCatalog.WORN,
+                  Map.of(FaultCatalog.SCALE, 0.97)));
+        }
+      }),
       at(
           20,
           stage ->

@@ -148,14 +148,14 @@ class DeltaRobotTest {
 
   /**
    * kSpeedAt12Volts, 5.85 m/s (TunerConstants.java:82), is what the motors and gearing reach, free,
-   * with FOC, to a few thousandths. The template runs them without FOC, so they reach 6.05 m/s: the
-   * tuner's speed is 0.2 m/s under the drive's, never over it as Beta's is.
+   * with FOC, to a few hundredths. The template runs them without FOC, so they reach 6.12 m/s: the
+   * tuner's speed is 0.27 m/s under the drive's, never over it as Beta's is.
    */
   @Test
   void theTunersSpeedAt12VoltsIsTheFocSpeedUnderWhatTheMotorsReach() {
     double free = MODULES.freeSpeed().in(MetersPerSecond);
 
-    assertThat(free).isCloseTo(6.053, within(0.005));
+    assertThat(free).isCloseTo(6.118, within(0.005));
     assertThat(5.85).isLessThan(free);
     assertThat(3.25).as("the drivers' top speed, Constants.java:45").isLessThan(free);
   }
@@ -210,15 +210,15 @@ class DeltaRobotTest {
   /**
    * Every velocity setpoint stays at or under its mechanism's free speed: the shooter's cap, 4500
    * rpm (Constants.java:68); the full send's 1000 (FullSend.java:46) and the transition's 2000
-   * (Transition.java:83), output rpm. The intake's 3000 output rpm (Intake.java:51) is exactly its
-   * motors' free speed through 2:1, so its velocity loop can't reach it under any load.
+   * (Transition.java:83), output rpm. The intake's 3000 output rpm (Intake.java:51) is 99% of its
+   * motors' free speed through 2:1, 3033 rpm, so its velocity loop can't hold it under load.
    */
   @Test
   void noSetpointIsFasterThanItsMotorsCanTurnIt() {
     assertThat(freeRpm(math, DeltaRobot.SHOOTER)).isGreaterThan(4500);
     assertThat(freeRpm(math, DeltaRobot.FULL_SEND)).isGreaterThan(1000);
     assertThat(freeRpm(math, DeltaRobot.TRANSITION)).isGreaterThan(2000);
-    assertThat(freeRpm(math, DeltaRobot.INTAKE)).isCloseTo(3000, within(1e-6));
+    assertThat(freeRpm(math, DeltaRobot.INTAKE)).isCloseTo(6065.0 / 2, within(1e-6));
   }
 
   /**
@@ -261,22 +261,21 @@ class DeltaRobotTest {
             DeltaRobot.FULL_SEND, Output.rpm("feeding", 5000), Output.rpm("unjamming", -1000));
 
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                swapped(
-                    ROBOT,
-                    DeltaRobot.FULL_SEND,
-                    targetingFeed,
-                    motors(DeltaRobot.FULL_SEND),
-                    JointFixtures.motors(targetingFeed, Motor.KRAKEN_X60, 1, Gearing.of(4))))
+        .isThrownBy(() ->
+            swapped(
+                ROBOT,
+                DeltaRobot.FULL_SEND,
+                targetingFeed,
+                motors(DeltaRobot.FULL_SEND),
+                JointFixtures.motors(targetingFeed, Motor.KRAKEN_X60, 1, Gearing.of(4))))
         .withMessage(
-            "RobotDefinition[delta].joints: full send's feeding, 5000 rpm, is 3.333 times its"
-                + " free speed, 1500 rpm: its motors can't turn it that fast; give it a speed under"
+            "RobotDefinition[delta].joints: full send's feeding, 5000 rpm, is 3.298 times its"
+                + " free speed, 1516 rpm: its motors can't turn it that fast; give it a speed under"
                 + " that");
   }
 
   /**
-   * The intake's 3000 rpm is exactly its motors' free speed through 2:1, so its velocity loop has
+   * The intake's 3000 rpm is 99% of its motors' free speed through 2:1, so its velocity loop has
    * nothing left to hold it under load: noted, not refused.
    */
   @Test
@@ -285,7 +284,7 @@ class DeltaRobotTest {
         .filteredOn(finding -> finding.level() == Finding.Level.DOUBT)
         .extracting(Finding::message)
         .containsExactly(
-            "intake's intaking, 3000 rpm, is 100% of its free speed, 3000 rpm: a velocity loop has"
+            "intake's intaking, 3000 rpm, is 99% of its free speed, 3033 rpm: a velocity loop has"
                 + " little or nothing left to hold it under load");
   }
 
@@ -329,8 +328,8 @@ class DeltaRobotTest {
       assertThat(pair[0] / pair[1]).isBetween(SANITY_LOW, SANITY_HIGH);
     }
     assertThat(pairs[0][0])
-        .as("a Kraken X60's 12 V over its 100 rps")
-        .isCloseTo(0.12, within(1e-9));
+        .as("a Kraken X60's 12 V over its 101.1 rps")
+        .isCloseTo(12 / (6065.0 / 60), within(1e-9));
   }
 
   /**

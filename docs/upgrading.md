@@ -15,7 +15,7 @@ merged when `./gradlew ci` passes and the robot drives.
 | Gradle | `gradle/wrapper/gradle-wrapper.properties`: `distributionUrl` and `distributionSha256Sum` |
 | The JDK Gradle runs on, and where a laptop without it downloads it | `gradle/gradle-daemon-jvm.properties`, written by `./gradlew updateDaemonJvm` |
 | The WPILib year that editors' WPILib tools use | `.wpilib/wpilib_preferences.json`: `projectYear` |
-| Vendor libraries: AdvantageKit, Commands v3, Phoenix 6, PhotonLib, REVLib | `vendordeps/*.json`, at the versions the runtime was built with |
+| Vendor libraries: AdvantageKit, Commands v3, CameraServer, AprilTag, Phoenix 6, PhotonLib, REVLib | `vendordeps/*.json`, at the versions the runtime was built with |
 | The checksum of every library and plugin the build downloads, the FRC libraries' among them | `gradle/verification-metadata.xml`, written by Gradle ([below](#dependency-checksums)) |
 | What waits on a library's release | the runtime's [docs/stand-ins.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/stand-ins.md) |
 | The version the README names | `README.md`, its status note |
@@ -90,7 +90,9 @@ pushed yet (`-PfrcMaven=file:///home/you/src/frc-maven`).
      (github.com/wpilibsuite/vendor-json-repo), from the folder for the new WPILib version. The
      vendors' own "latest" links can point at another year's release there, or at nothing.
    - After it, `./gradlew vendordep --url=<the jsonUrl in the file>` fetches the latest.
-   - `CommandsV3.json` ships with WPILib: copy it from the `vendordeps` folder of the new install.
+   - `CommandsV3.json`, `CameraServer.json` and `AprilTag.json` ship with WPILib: copy them from
+     the `vendordeps` folder of the new install. Since alpha 8, GradleRIO no longer brings the camera
+     server, OpenCV or AprilTag, and PhotonLib's simulation needs all three.
    - A file whose name carries its version (Phoenix 6's): delete the old file. Two versions of one
      library can't both be in `vendordeps/`.
    - PhotonLib: the coprocessors must run the same PhotonVision version as the library.

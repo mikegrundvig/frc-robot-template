@@ -309,12 +309,11 @@ public final class CameraScoring {
       List<Future<?>> workers = new ArrayList<>();
       for (IntConsumer own : each) {
         workers.add(
-            pool.submit(
-                () -> {
-                  for (int i = next.getAndIncrement(); i < count; i = next.getAndIncrement()) {
-                    own.accept(i);
-                  }
-                }));
+            pool.submit(() -> {
+              for (int i = next.getAndIncrement(); i < count; i = next.getAndIncrement()) {
+                own.accept(i);
+              }
+            }));
       }
       for (Future<?> worker : workers) {
         worker.get();

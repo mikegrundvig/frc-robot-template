@@ -125,22 +125,21 @@ class BetaAutosSimTest {
     double[] pathEnds = {Double.NaN, Double.NaN};
     double[] now = {0};
     sim.scheduler()
-        .addEventListener(
-            event -> {
-              if (event instanceof SchedulerEvent.Mounted mounted
-                  && mounted.command() instanceof DriveMove
-                  && Double.isNaN(pivotAtFirstPath[0])) {
-                pivotAtFirstPath[0] = Math.toDegrees(truth.position(BetaRobot.PIVOT));
-              }
-              if (event instanceof SchedulerEvent.Completed done
-                  && done.command() instanceof DriveMove move) {
-                moves.add(Ended.ended(move));
-                if (Double.isNaN(pathEnds[0])) {
-                  pathEnds[0] = now[0];
-                }
-                pathEnds[1] = now[0];
-              }
-            });
+        .addEventListener(event -> {
+          if (event instanceof SchedulerEvent.Mounted mounted
+              && mounted.command() instanceof DriveMove
+              && Double.isNaN(pivotAtFirstPath[0])) {
+            pivotAtFirstPath[0] = Math.toDegrees(truth.position(BetaRobot.PIVOT));
+          }
+          if (event instanceof SchedulerEvent.Completed done
+              && done.command() instanceof DriveMove move) {
+            moves.add(Ended.ended(move));
+            if (Double.isNaN(pathEnds[0])) {
+              pathEnds[0] = now[0];
+            }
+            pathEnds[1] = now[0];
+          }
+        });
     List<Double> feedStarts = new ArrayList<>();
     boolean feeding = false;
     double unready = 0;
@@ -241,13 +240,12 @@ class BetaAutosSimTest {
     Pose2d before = sim.simulation().truePose();
     List<String> moves = new ArrayList<>();
     sim.scheduler()
-        .addEventListener(
-            event -> {
-              if (event instanceof SchedulerEvent.Mounted mounted
-                  && mounted.command() instanceof DriveMove move) {
-                moves.add(move.name());
-              }
-            });
+        .addEventListener(event -> {
+          if (event instanceof SchedulerEvent.Mounted mounted
+              && mounted.command() instanceof DriveMove move) {
+            moves.add(move.name());
+          }
+        });
 
     RobotSim.enable(RobotMode.AUTONOMOUS, true);
     sim.run(AutoCheck.AUTONOMOUS_SECONDS);

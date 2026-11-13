@@ -263,18 +263,17 @@ public final class EstimatorStudy {
             EstimatorRuns.FIELD.length(), EstimatorRuns.FIELD.width()));
     EstimatorRuns.FIELD.tags().values().stream()
         .sorted(Comparator.comparingInt(Tag::id))
-        .forEach(
-            tag -> {
-              Pose3d pose = tag.pose();
-              text.append(
-                  format(
-                      "tag %2d at %5.2f, %5.2f, %4.2f facing %4.0f°%n",
-                      tag.id(),
-                      pose.getX(),
-                      pose.getY(),
-                      pose.getZ(),
-                      Math.toDegrees(pose.getRotation().getZ())));
-            });
+        .forEach(tag -> {
+          Pose3d pose = tag.pose();
+          text.append(
+              format(
+                  "tag %2d at %5.2f, %5.2f, %4.2f facing %4.0f°%n",
+                  tag.id(),
+                  pose.getX(),
+                  pose.getY(),
+                  pose.getZ(),
+                  Math.toDegrees(pose.getRotation().getZ())));
+        });
     return text.toString();
   }
 
